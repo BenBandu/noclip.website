@@ -1,14 +1,13 @@
 import * as Viewer from '../viewer.js';
 import {SceneDesc, SceneGfx} from '../viewer.js';
-import {GfxDevice} from "../gfx/platform/GfxPlatform";
+import {GfxBufferUsage, GfxDevice} from "../gfx/platform/GfxPlatform";
 import {SceneContext} from "../SceneBase";
 import {PakArchive} from "./PakArchive";
 import {SharkFile} from "./SharkFile";
 import {EmptyScene} from "../Scenes_Test";
 import {Bundle, ModelInfo} from "./Bundle";
-import {assert} from "../util";
-import {LocationInit, LoadTree, Entity} from "./Types";
-import {DeviceProgram} from "../Program";
+import {Entity, LoadTree, LocationInit} from "./Types";
+import {makeStaticDataBuffer} from "../gfx/helpers/BufferHelpers";
 
 export class DreamfallSceneDesc implements SceneDesc {
     private static basePath: string = `Dreamfall/bin/res`;
@@ -26,23 +25,38 @@ export class DreamfallSceneDesc implements SceneDesc {
         const level = new SharkFile(this.id, this.pak.getFileData(`data/generated/locations/${this.id}.cdr`)!);
         this.prepareLevel(level.root);
 
-        // SharkFiles hold multiple different structures
-        // Consider separate implementations for each of these instead of generic class?
-        // .cdr = Capsule Definition Resource? - Has Level Initialization Data
-        // .sir = Scene Index Resource? - Has Model Tree data
-        // .spr = Scene Position Resource? - Has Model position data?
-        // .smr = Scene Model Resource?  - Don't seem to exist in pak, but might be part of the bundle
-        // .bpr = Binary Pose Resource? - Animation files
-        // .sdr = Shader Directory Resource? - Seems to be some shader container with various shader variations?
-        // .sgr = Shader Graph Resource? - contains asm frag/vert shader references
-        // .scr = Shader Code Resource? - contains actual d3d9 shader asm?
-        // .ikr = IK Resource? - contains IK data?
+        for(let model of this.models) {
+            let submesh = model.mesh?.subMeshes[0];
+            if(!submesh) {
+                console.log(`No submesh found for ${model.name}`);
+                continue;
+            }
+
+            if(submesh.header.formatIdx === 0 || submesh.header.bitcode === 0)
+            {
+                console.log(`No format defined for ${model.name}`);
+                continue;
+            }
+
+            const formatIndex = (submesh.header.formatIdx / 4 - this.bundle.files.length - 3) / 18
+            const formatInfo = this.bundle.attributeDescriptorInfo[formatIndex];
+            const bufferInfo = this.bundle.vertexBufferInfo[model.vIndex];
+
+            let stride = submesh.header.vertexCount / submesh.header.animCount;
+            if(bufferInfo.length / bufferInfo.size !== stride || bufferInfo.size !== formatInfo.size) {
+                console.log(`Length mismatch for ${model.name}`);
+                continue;
+            }
+
+            const vb = this.bundle.data.createTypedArray(Float32Array, formatInfo.size * stride, submesh.header.vertexCount);
+            // makeStaticDataBuffer(device, GfxBufferUsage.Vertex, vb.buffer);
+            // makeStaticDataBuffer(device, GfxBufferUsage.Index, submesh.indices.buffer);
+        }
 
         return new EmptyScene();
     }
 
     private prepareLevel(level: any) {
-        console.log(level);
         const children = level.actor_param!.child_param!.children;
 
         for(const child of children) {
@@ -58,9 +72,6 @@ export class DreamfallSceneDesc implements SceneDesc {
                 // Do nothing
             }
         }
-
-        console.log(this.entities);
-        console.log(this.models);
 
         return;
         /*

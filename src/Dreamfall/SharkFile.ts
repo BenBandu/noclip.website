@@ -14,6 +14,19 @@ export enum SharkType {
 }
 
 export class SharkFile {
+
+    // SharkFiles hold multiple different structures
+    // Consider separate implementations for each of these instead of generic class?
+    // .cdr = Capsule Definition Resource? - Has Level Initialization Data
+    // .sir = Scene Index Resource? - Has Model Tree data
+    // .spr = Scene Position Resource? - Has Model position data?
+    // .smr = Scene Model Resource?  - Don't seem to exist in pak, but might be part of the bundle
+    // .bpr = Binary Pose Resource? - Animation files
+    // .sdr = Shader Directory Resource? - Seems to be some shader container with various shader variations?
+    // .sgr = Shader Graph Resource? - contains asm frag/vert shader references
+    // .scr = Shader Code Resource? - contains actual d3d9 shader asm?
+    // .ikr = IK Resource? - contains IK data?
+
     private static magic = "shark3d_snake_binary";
 
     public root: {[key: string]: any};
