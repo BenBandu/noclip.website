@@ -1,5 +1,7 @@
 import { assert, readString } from "../util.js";
 import ArrayBufferSlice from "../ArrayBufferSlice";
+import {PakArchive} from "./PakArchive";
+import {BinaryReader} from "./Utils";
 
 export enum SharkType {
     EMPTY = 0,
@@ -30,37 +32,40 @@ export class SharkFile {
     private static magic = "shark3d_snake_binary";
 
     public root: {[key: string]: any};
-    private offset: number;
-
     private stringTable = new Map<number, string>();
     private stringCount = 0;
 
-    constructor(private id: string, private sharkData: ArrayBufferSlice) {
-        this.parse();
+    constructor(private id: string, data: ArrayBufferSlice) {
+        this.parse(data);
     }
 
-    private parse() {
-        this.offset = 0;
+    public static fetch(path: string, archive: PakArchive): any | null {
+        const data = archive.getFile(path);
+        if(data === null) {
+            return null;
+        }
 
-        const magic = readString(this.sharkData, this.offset);
-        this.offset += SharkFile.magic.length + 1
-
-        const ver = readString(this.sharkData, this.offset)
-        this.offset += "2x4".length + 1
-
-        assert(magic === SharkFile.magic && ver === "2x4", `Magic mismatch in Shark3D "${this.id}"`);
-
-        this.root = this.parseNode();
+        let file = new SharkFile(path, data);
+        return file.root;
     }
 
-    private parseNode(): any {
-        const nodeCount = this.readVariableSizeInt();
+    private parse(data: ArrayBufferSlice) {
+        const br = new BinaryReader(data, false)
+
+        const magic = br.string0();
+        const version = br.string0();
+        assert(magic === SharkFile.magic && version === "2x4", `Magic mismatch in Shark3D`);
+
+        this.root = this.parseNode(br);
+    }
+
+    private parseNode(br: BinaryReader): any {
+        const nodeCount = br.variableInt();
         const node: {[key: string]: any} = {};
 
         for(let i = 0; i < nodeCount; i++) {
-            const name = this.retrieveString();
-            const code = this.sharkData.createDataView(this.offset, 1).getUint8(0);
-            this.offset += 1;
+            const name = this.retrieveString(br);
+            const code = br.uint8();
 
             const type: SharkType = code ? Math.floor(Math.log2(code) + 1) : 0;
             switch(type) {
@@ -68,44 +73,44 @@ export class SharkFile {
                     node[name] = null;
                     break;
                 case SharkType.INT:
-                    node[name] = this.readVariableSizeInt();
+                    node[name] = br.variableInt();
                     break;
                 case SharkType.INT_ARRAY:
-                    let integers: number[] = new Array(this.readVariableSizeInt())
+                    let integers: number[] = new Array(br.variableInt())
                     for(let k = 0; k < integers.length; k++) {
-                        integers[k] = this.readVariableSizeInt();
+                        integers[k] = br.variableInt();
                     }
                     node[name] = integers;
                     break;
                 case SharkType.FLOAT:
-                    node[name] = this.readBigEndianFloat();
+                    node[name] = br.float32();
                     break;
                 case SharkType.FLOAT_ARRAY:
-                    const floats: number[] = new Array(this.readVariableSizeInt());
+                    const floats: number[] = new Array(br.variableInt());
                     for(let k = 0; k < floats.length; k++) {
-                        floats[k] = this.readBigEndianFloat();
+                        floats[k] = br.float32();
                     }
 
                     node[name] = floats;
                     break;
                 case SharkType.STRING:
-                    node[name] = this.retrieveString();
+                    node[name] = this.retrieveString(br);
                     break;
                 case SharkType.STRING_ARRAY:
-                    const strings: string[] = new Array(this.readVariableSizeInt());
+                    const strings: string[] = new Array(br.variableInt());
                     for(let k = 0; k < strings.length; k++) {
-                        strings[k] = this.retrieveString();
+                        strings[k] = this.retrieveString(br);
                     }
 
                     node[name] = strings;
                     break;
                 case SharkType.OBJECT:
-                    node[name] = this.parseNode();
+                    node[name] = this.parseNode(br);
                     break;
                 case SharkType.OBJECT_ARRAY:
-                    const nodes: {[key: string]: any} = new Array(this.readVariableSizeInt());
+                    const nodes: {[key: string]: any} = new Array(br.variableInt());
                     for(let k = 0; k < nodes.length; k++) {
-                        nodes[k] = this.parseNode();
+                        nodes[k] = this.parseNode(br);
                     }
                     node[name] = nodes;
                     break;
@@ -117,52 +122,20 @@ export class SharkFile {
         return node;
     }
 
-    private readVariableSizeInt(): number {
-        const iterationCount = 10;
-        const data = this.sharkData.createDataView(this.offset, iterationCount);
-        let result = 0;
-
-        for (let i = 0; i < iterationCount; i++) {
-            const byte = data.getInt8(i);
-            this.offset += 1;
-
-            const content = byte & 0x7F;
-            const offset = i * 0x07;
-
-            result |= content << offset;
-
-            if((byte & 0x80) === 0) {
-                if(byte & 0x40) {
-                    result -= 1 << offset;
-                }
-
-                return result;
-            }
-        }
-
-        assert(false, `Max iterations reached when decoding variable length integer in ${this.id}.cdr`)
-    }
-
-    private readBigEndianFloat(): number {
-        const val = this.sharkData.createDataView(this.offset, 4).getFloat32(0, false);
-        this.offset += 4;
-
-        return val;
-    }
-
-    private retrieveString(): string {
-        const num = this.readVariableSizeInt();
+    private retrieveString(br: BinaryReader): string {
+        const num = br.variableInt();
         const index = this.stringCount - num;
         if(num === 0) {
             this.stringCount++;
         }
+
         if(this.stringTable.has(index)) {
             return this.stringTable.get(index)!;
         }
-        const value = readString(this.sharkData, this.offset);
-        this.offset += value.length + 1;
 
+        const value = br.string0();
         this.stringTable.set(index, value);
+
         return value;
     }
 }

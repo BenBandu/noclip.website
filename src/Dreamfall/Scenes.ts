@@ -1,201 +1,21 @@
 import * as Viewer from '../viewer.js';
 import {SceneDesc, SceneGfx} from '../viewer.js';
-import {GfxBufferUsage, GfxDevice} from "../gfx/platform/GfxPlatform";
+import {GfxDevice} from "../gfx/platform/GfxPlatform";
 import {SceneContext} from "../SceneBase";
 import {PakArchive} from "./PakArchive";
-import {SharkFile} from "./SharkFile";
-import {EmptyScene} from "../Scenes_Test";
-import {Bundle, ModelInfo} from "./Bundle";
-import {Entity, LoadTree, LocationInit} from "./Types";
-import {makeStaticDataBuffer} from "../gfx/helpers/BufferHelpers";
+import {DreamfallRenderer} from "./Renderer";
+import {Level} from "./Level";
 
 export class DreamfallSceneDesc implements SceneDesc {
     private static basePath: string = `Dreamfall/bin/res`;
-    private pak: PakArchive;
-    private bundle: Bundle;
-    private placements: {[key: string]: number[]} = {};
-    private entities: Entity[] = [];
-    private models: ModelInfo[] = [];
 
     constructor(public id: string, public name: string) {
     }
 
     public async createScene(device: GfxDevice, sceneContext: SceneContext): Promise<SceneGfx> {
-        this.pak = new PakArchive(this.id, await sceneContext.dataFetcher.fetchData(`${DreamfallSceneDesc.basePath}/${this.id}.pak`));
-        const level = new SharkFile(this.id, this.pak.getFileData(`data/generated/locations/${this.id}.cdr`)!);
-        this.prepareLevel(level.root);
-
-        for(let model of this.models) {
-            let submesh = model.mesh?.subMeshes[0];
-            if(!submesh) {
-                console.log(`No submesh found for ${model.name}`);
-                continue;
-            }
-
-            if(submesh.header.formatIdx === 0 || submesh.header.bitcode === 0)
-            {
-                console.log(`No format defined for ${model.name}`);
-                continue;
-            }
-
-            const formatIndex = (submesh.header.formatIdx / 4 - this.bundle.files.length - 3) / 18
-            const formatInfo = this.bundle.attributeDescriptorInfo[formatIndex];
-            const bufferInfo = this.bundle.vertexBufferInfo[model.vIndex];
-
-            let stride = submesh.header.vertexCount / submesh.header.animCount;
-            if(bufferInfo.length / bufferInfo.size !== stride || bufferInfo.size !== formatInfo.size) {
-                console.log(`Length mismatch for ${model.name}`);
-                continue;
-            }
-
-            const vb = this.bundle.data.createTypedArray(Float32Array, formatInfo.size * stride, submesh.header.vertexCount);
-            // makeStaticDataBuffer(device, GfxBufferUsage.Vertex, vb.buffer);
-            // makeStaticDataBuffer(device, GfxBufferUsage.Index, submesh.indices.buffer);
-        }
-
-        return new EmptyScene();
-    }
-
-    private prepareLevel(level: any) {
-        const children = level.actor_param!.child_param!.children;
-
-        for(const child of children) {
-            const [src, type] = child.type.split('.');
-            switch(type) {
-                case 'locationinit':
-                    this.initLocation(child.param);
-                    break;
-                case 'loadtree':
-                    this.loadTree(child.param);
-                    break;
-                default:
-                // Do nothing
-            }
-        }
-
-        return;
-        /*
-        // Find shaders used by instances
-        const shaderContainers: {[key: string]: any} = {};
-        const modelShaders = [];
-        for(const model of instances) {
-            if(!model.shader) {
-                modelShaders.push(null);
-                continue;
-            }
-
-            const [path, name] = model.shader.split('#');
-
-            if(!shaderContainers.hasOwnProperty(path)) {
-                const shaderContainer = new SharkFile(model.name, this.pak.getFileData(path)!);
-                console.log(shaderContainer.root);
-                shaderContainers[path] = Array.isArray(shaderContainer.root.shaders)
-                    ? shaderContainer.root.shaders
-                    : [shaderContainer.root.shaders];
-            }
-
-            let shader = shaderContainers[path].find((shader: any) => shader.name === name);
-            assert(shader !== undefined);
-            modelShaders.push(shader);
-        }
-
-        // Find Compiled d3d9 assembly vert/frag-shaders
-        const programs: {[key: string]: any} = {};
-        for(const shader of modelShaders) {
-            if(shader === null) {
-                continue;
-            }
-
-            let params = null;
-            if(shader.param.hasOwnProperty('passes')) {
-                params = shader.param;
-            } else if(shader.param.hasOwnProperty('children')) {
-                const platform = shader.param.children.find((child: any) => !child.hasOwnProperty('plat_pat'));
-                const [factory, type] = platform.child_type.split('|');
-                if(type === 'variants') {
-                    params = platform.child_param.children[0].param;
-                } else {
-                    params = platform.child_param;
-                }
-            } else {
-                params = {passes: [shader.param]};
-            }
-
-            const passes = Array.isArray(params.passes) ? params.passes : [params.passes];
-            for(let pass of passes) {
-                if(!pass.hasOwnProperty('shaderprog')) {
-                    continue;
-                }
-
-                if(programs.hasOwnProperty(pass.shaderprog)) {
-                    continue;
-                }
-
-                let prog = new SharkFile(pass.shaderprog, this.pak.getFileData(pass.shaderprog)!);
-                let fs = prog.root.d3d9_asm.fragshader;
-                let fs_code = Array.isArray(fs.code_variant_array)
-                    ? fs.code_variant_array[0].code
-                    : fs.code_variant_array.code;
-
-                let vs = prog.root.d3d9_asm.vertshader;
-                let vs_code = Array.isArray(vs.code_variant_array)
-                    ? vs.code_variant_array[0].code
-                    : vs.code_variant_array.code;
-
-                let frag = this.pak.getFileData(fs_code)!;
-                let vert = this.pak.getFileData(vs_code)!;
-
-                programs[pass.shaderprog] = {
-                    fs: frag,
-                    vs: vert,
-                };
-            }
-        }
-        */
-    }
-
-    private initLocation(params: LocationInit) {
-        // Bundled render data (vertex buffers, descriptors, textures, etc...)
-        this.bundle = new Bundle(this.pak.getFileData(params.bundle)!);
-
-        if(params.placement_point_names && params.placement_point_transfs) {
-            for(let i = 0; i < params.placement_point_names.length; i++) {
-                let placementName = params.placement_point_names[i];
-                this.placements[placementName] = params.placement_point_transfs.slice(i * 7, i * 7 + 7);
-            }
-        }
-
-        // TODO: Initialize more of the parameters?
-    }
-
-    private loadTree(params: LoadTree) {
-        if(params.state === '^state_display') {
-            // Return if meant for inventory
-            return;
-        }
-
-        let filepath = params.tree.split('.')[0];
-
-        const tree = new SharkFile(params.name, this.pak.getFileData(params.tree)!);
-        let entities: any = tree.root.data.root.child_array
-        if(!entities) {
-            return;
-        }
-
-        if(!Array.isArray(entities)) {
-            entities = [entities];
-        }
-
-        for(let entity of entities) {
-            this.entities.push(entity);
-
-            if(entity.model) {
-                const model = this.bundle.getModelData(filepath + '.smr', entity.model);
-                if(model !== null) {
-                    this.models.push(model);
-                }
-            }
-        }
+        const archive = new PakArchive(this.id, await sceneContext.dataFetcher.fetchData(`${DreamfallSceneDesc.basePath}/${this.id}.pak`));
+        const level = new Level(this.id, archive);
+        return new DreamfallRenderer(device, level);
     }
 }
 

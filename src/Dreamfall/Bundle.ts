@@ -2,12 +2,12 @@ import ArrayBufferSlice from "../ArrayBufferSlice";
 import {readString, assert} from "../util";
 
 interface VertexBufferInfo {
+    stride: number;
     size: number;
-    length: number;
     offset: number;
 }
 
-interface MeshHeader {
+interface ModelHeader {
     nameOffset: number;
     scale: number;
     center: number[];
@@ -17,10 +17,10 @@ interface MeshHeader {
     boneDataOffset: number;
     textureCount: number;
     textureOffset: number;
-    submeshCount: number;
+    meshCount: number;
 }
 
-interface SubMeshHeader {
+interface MeshHeader {
     magicCount: number;
     magicOffset: number;
     formatIdx: number;
@@ -55,11 +55,12 @@ interface SubMeshHeader {
     textureCount: number;
 }
 
-interface SubMeshData {
-    header: SubMeshHeader;
+interface MeshData {
+    header: MeshHeader;
     textureOffsets: number[],
     magic: number[],
     indices: Uint16Array,
+    vertices?: Float32Array;
     boneUsage: number[],
     boneVertices: number[],
     boneIndices: number[],
@@ -79,12 +80,12 @@ interface SubMeshData {
     tex: TextureData[],
 }
 
-interface MeshData {
-    header: MeshHeader;
+interface ModelData {
+    header: ModelHeader;
     name: string;
     bones: BoneData[];
     textures: string[];
-    subMeshes: SubMeshData[];
+    meshes: MeshData[];
 }
 
 interface BoneData {
@@ -104,7 +105,7 @@ export interface ModelInfo {
     offset: number;
     name: string;
     vIndex: number;
-    mesh: MeshData | null;
+    model: ModelData | null;
 }
 
 interface AttributeDescriptor {
@@ -133,6 +134,7 @@ export class Bundle {
 
     getModelData(fileName: string, modelName: string): null | ModelInfo {
         const file = this.files.find((file) => fileName === file.name);
+        console.log(file);
         if(!file) {
             return null;
         }
@@ -144,6 +146,15 @@ export class Bundle {
 
         if(!this.parseMesh(model)) {
             return null;
+        }
+
+
+        if(model.model) {
+            const vInfo = this.vertexBufferInfo[model.vIndex];
+            const vertices = this.data.createTypedArray(Float32Array, vInfo.offset, vInfo.size / vInfo.stride);
+            for(const mesh of model.model?.meshes) {
+                mesh.vertices = vertices;
+            }
         }
 
         return model;
@@ -174,12 +185,12 @@ export class Bundle {
         this.vertexBufferInfo = new Array(vertexBufferCount);
         for (let i = 0; i < this.vertexBufferInfo.length; i++) {
             this.vertexBufferInfo[i] = {
-                size: data.getInt32(offset, true),
-                length: data.getInt32(offset + 4, true),
+                stride: data.getInt32(offset, true),
+                size: data.getInt32(offset + 4, true),
                 offset: offset + 8,
             }
 
-            offset += 8 + this.vertexBufferInfo[i].length;
+            offset += 8 + this.vertexBufferInfo[i].size;
         }
 
         this.modelStartOffset = offset;
@@ -197,7 +208,6 @@ export class Bundle {
             offset += 4;
         }
 
-        const descriptorSize = 4 * 18; // 18 numbers of 4 bytes
         this.attributeDescriptorInfo = new Array(streamCount);
         for(let i = 0; i < this.attributeDescriptorInfo.length; i++) {
             const size = data.getInt32(offset, true);
@@ -226,22 +236,22 @@ export class Bundle {
             file.name = readString(this.data, offset);
             offset += 0x80; // Model name is null terminated, but has 0x80 of space reserved
 
-            const meshCount = data.getInt32(offset, true);
+            const modelCount = data.getInt32(offset, true);
             offset += 4;
 
-            file.models = new Array(meshCount);
-            for(let j = 0; j < meshCount; j++) {
+            file.models = new Array(modelCount);
+            for(let j = 0; j < modelCount; j++) {
                 file.models[j] = {
-                    offset: data.getInt32(offset, true),
+                    offset: data.getUint32(offset, true),
                     name: "",
                     vIndex: 0,
-                    mesh: null,
+                    model: null,
                 }
 
                 offset += 4;
             }
 
-            for(let j = 0; j < meshCount; j++) {
+            for(let j = 0; j < modelCount; j++) {
                 const model = file.models[j];
 
                 offset = this.modelStartOffset + model.offset;
@@ -275,9 +285,9 @@ export class Bundle {
                     offset += 4;
 
                     // divide offset by 4 to get the data in DWORD size
-                    // subtract the mount of files and subtract size of header data
+                    // subtract the amount of files and subtract size of header data
                     // divide the length of the data for each file
-                    // which gives us the index into th array
+                    // which gives us the index into the array
                     const descriptorIndex = (descriptorOffset / 4 - this.files.length - 3) / 18;
                     if(this.attributeDescriptorInfo[descriptorIndex].size != 0) {
                         offset += 0x6C;
@@ -295,7 +305,7 @@ export class Bundle {
         const headerData = this.data.createDataView(baseOffset, headerSize);
         let offset = 0;
 
-        const header: MeshHeader = {
+        const header: ModelHeader = {
             nameOffset: headerData.getUint32(offset, true),
             scale: 1.0 - headerData.getFloat32(offset += 4, true),
             center: [
@@ -313,17 +323,17 @@ export class Bundle {
             boneDataOffset: headerData.getUint32(offset += 4, true),
             textureCount: headerData.getUint32(offset += 4, true),
             textureOffset: headerData.getUint32(offset += 4, true),
-            submeshCount: headerData.getUint32(offset += 12, true), // skip unknown section
+            meshCount: headerData.getUint32(offset += 12, true), // skip unknown section
         }
         offset += 4;
 
-        if(!header.submeshCount) {
+        if(!header.meshCount) {
             return false;
         }
 
         baseOffset += headerSize;
         const meshSize =
-            4 * header.submeshCount +
+            4 * header.meshCount +
             model.name.length + 1 +
             68 * header.boneCount +
             4 * header.textureCount;
@@ -331,23 +341,16 @@ export class Bundle {
         const meshData = this.data.createDataView(baseOffset, meshSize);
         offset = 0;
 
-        const mesh: MeshData = {
+        const mesh: ModelData = {
             header: header,
             name: '',
             bones: [],
             textures: [],
-            subMeshes: [],
+            meshes: [],
         }
 
-        //TODO: These should probably use the Uint32Array equivalent instead of making js arrays
-
-        mesh.subMeshes = Array.from({length: header.submeshCount},
-            (_, i) => {
-                const submeshOffset = meshData.getUint32(offset + i * 4, true);
-                return this.parseSubMesh(this.modelStartOffset + submeshOffset);
-            }
-        );
-        offset += 4 * header.submeshCount;
+        // Skip unused part offset?
+        offset += 4 * header.meshCount;
 
         mesh.name = readString(this.data, baseOffset + offset);
         offset += mesh.name.length + 1;
@@ -373,18 +376,25 @@ export class Bundle {
                 return this.textures[index];
             },
         );
+        offset += mesh.textures.length * 4;
 
-        model.mesh = mesh;
+        mesh.meshes = Array.from({length: header.meshCount},
+            (_, i) => {
+                return this.parseSubMesh(baseOffset + offset);
+            }
+        );
+
+        model.model = mesh;
         return true;
     }
 
-    private parseSubMesh(submeshOffset: number): SubMeshData {
+    private parseSubMesh(submeshOffset: number): MeshData {
         const headerSize = 264;
         const meshDataOffset = submeshOffset + headerSize;
         const headerData = this.data.createDataView(submeshOffset, headerSize);
         let offset = 72; // Skip unknown section
 
-        const header: SubMeshHeader = {
+        const header: MeshHeader = {
             magicCount: headerData.getInt32(offset, true),
             magicOffset: headerData.getUint32(offset += 4, true),
             formatIdx: headerData.getInt32(offset += 4, true),
@@ -420,11 +430,10 @@ export class Bundle {
         };
         offset += 4;
 
-        //TODO: Pre-calculate size of submesh instead?
         const meshData = this.data.createDataView(meshDataOffset);
         offset = 0;
 
-        const submesh: SubMeshData = {
+        const submesh: MeshData = {
             header: header,
             textureOffsets: [],
             magic: [],
@@ -460,6 +469,11 @@ export class Bundle {
         );
         offset += 4 * submesh.magic.length;
 
+        assert(
+            this.modelStartOffset + submesh.header.indexOffset === meshDataOffset + offset,
+            `Index offset mismatch, expected offset ${this.modelStartOffset + submesh.header.indexOffset}, actual offset ${meshDataOffset + offset}`
+        );
+
         submesh.indices = this.data.createTypedArray(Uint16Array, meshDataOffset + offset, header.indexCount);
         offset += 2 * submesh.indices.length;
 
@@ -490,15 +504,20 @@ export class Bundle {
         );
         offset += 4 * submesh.tax1.length;
 
-        submesh.tax2 = Array.from({length: header.tax1Count},
+        submesh.tax2 = Array.from({length: header.tax2Count},
             (_, i) => meshData.getUint32(offset + i * 4, true)
         );
         offset += 4 * submesh.tax2.length;
 
-        submesh.tax3 = Array.from({length: header.tax1Count},
+        submesh.tax3 = Array.from({length: header.tax3Count},
             (_, i) => meshData.getUint32(offset + i * 4, true)
         );
         offset += 4 * submesh.tax3.length;
+
+        assert(
+            submesh.header.xTableOffset === 0 || this.modelStartOffset + submesh.header.xTableOffset === meshDataOffset + offset,
+            `xTable offset mismatch, expected offset ${this.modelStartOffset + submesh.header.xTableOffset}, actual offset ${meshDataOffset + offset}`
+        );
 
         submesh.xTable = Array.from({length: header.xTableCount},
             (_, i) => meshData.getUint8(offset + i)
@@ -560,13 +579,20 @@ export class Bundle {
                 cf1: meshData.getUint32(offset, true),
                 cf2: meshData.getUint32(offset += 4, true),
                 offset: meshData.getUint32(offset += 4, true),
-                unknown: meshData.getUint32(offset += 4, true),
+                unknown: meshData.getInt32(offset += 4, true),
                 indices: [],
             });
+            offset += 4
+
+            assert(
+                this.modelStartOffset + submesh.tex[i].offset === meshDataOffset + offset,
+                `texture offset mismatch, expected offset ${this.modelStartOffset + submesh.tex[i].offset}, actual offset ${meshDataOffset + offset}`
+            );
 
             submesh.tex[i].indices = Array.from({length: header.texStageCount},
                 (_, j) => meshData.getInt32(offset + j * 4, true)
             );
+            offset += 4 * submesh.tex[i].indices.length;
         }
 
 

@@ -1,4 +1,4 @@
-interface SoundDefaults {
+interface SoundParams {
     event: number,
     occlusion_level: number,
     reverb_level: number,
@@ -6,7 +6,7 @@ interface SoundDefaults {
     sound_level: number,
 }
 
-interface AmbientSound {
+interface AmbientSoundParams {
     enable: number,
     id: number,
     looped: boolean,
@@ -19,9 +19,9 @@ interface AmbientSound {
     wave: string,
 }
 
-export interface LocationInit {
+export interface LocationParams {
     adjacent_locations: string[];
-    ambient_sounds: AmbientSound[];
+    ambient_sounds: AmbientSoundParams[];
     bpr_files?: string[];
     bundle: string;
     env_slot_0: string;
@@ -32,7 +32,7 @@ export interface LocationInit {
     lockpick_game: boolean;
     placement_point_names?: string[];
     placement_point_transfs?: number[];
-    sound_default?: SoundDefaults[],
+    sound_default?: SoundParams[],
     sound_group_list?: number[],
     soundlevel_combat?: number,
     soundlevel_footsteps?: number,
@@ -43,7 +43,7 @@ export interface LocationInit {
     waves?: string[],
 }
 
-export interface LoadTree {
+export interface TreeParams {
     default_shader: string;
     model_prefix: string;
     name: string;
@@ -54,7 +54,7 @@ export interface LoadTree {
     watch_target?: string;
 }
 
-export interface Entity {
+export interface EntityParams {
     cast_shadows?: boolean;
     ilkint?: number;
     model: string;
@@ -64,5 +64,5 @@ export interface Entity {
     transl?: number[];
     quat?: number[];
     reduce?: boolean;
-    child_array?: Entity[];
+    child_array?: EntityParams[];
 }

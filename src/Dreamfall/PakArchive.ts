@@ -1,14 +1,17 @@
 import {DataFetcher, NamedArrayBufferSlice} from "../DataFetcher";
 import { assert, readString } from "../util.js";
 import ArrayBufferSlice from "../ArrayBufferSlice";
+import {BinaryReader} from "./Utils";
 
 export interface PakNode {
     offset: number;
     fileSize: number;
-    pathBlockOffset: number;
-    pathBlockLength: number;
+    nextNodeOffset: number;
+    totalPathLength: number;
     pathStartIndex: number;
-    pathSegment: string;
+    isRootNode?: boolean;
+    isLeafNode?: boolean;
+    pathSegment?: string;
 }
 
 export class PakArchive {
@@ -16,127 +19,94 @@ export class PakArchive {
     private static charTable = `\0abcdefghijklmnopqrstuvwxyz\\??-_'.0123456789`;
 
     private nodes: PakNode[];
-    private pathTable: string[];
-    private lenBlock: number[];
 
-    constructor(private id: string, private pakData: NamedArrayBufferSlice) {
+    constructor(private id: string, private data: NamedArrayBufferSlice) {
         this.parse();
     }
 
     private parse() {
-        const magic = readString(this.pakData, 0, PakArchive.magic.length, false);
+        const br = new BinaryReader(this.data);
+        const magic = br.string(PakArchive.magic.length);
         assert(magic === PakArchive.magic, `Magic mismatch in pak "${this.id}"`);
 
-        let offset = PakArchive.magic.length;
-        offset += this.parseHeader(this.pakData.createDataView(offset, 0x0C));
-        offset += this.parseNodes(this.pakData.createDataView(offset, 0x14 * this.nodes.length));
-        offset += this.parsePathTable(this.pakData.createDataView(offset, this.pathTable.length));
-        offset += this.parseLenBlock(this.pakData.createDataView(offset, 0x04 * this.lenBlock.length));
+        this.parseNodes(br);
     }
 
-    private parseHeader(data: DataView): number {
-        const nodeCount = data.getInt32(0x00, true);
-        const numCount = data.getInt32(0x04, true);
-        const charCount = data.getInt32(0x08, true);
+    private parseNodes(br: BinaryReader) {
+        this.nodes = new Array<PakNode>(br.uint32());
+        const stringCount = br.uint32();
+        const indexBufferSize = br.uint32();
 
-        this.nodes = new Array(nodeCount);
-        this.lenBlock = new Array(numCount);
-        this.pathTable = new Array(charCount);
-
-        return data.byteLength;
-    }
-
-    private parseNodes(data: DataView): number {
         for(let i = 0; i < this.nodes.length; i++) {
-            const nodeOffset = 0x14 * i;
-
-            const node: PakNode = {
-                offset: data.getInt32(nodeOffset, true),
-                fileSize: data.getInt32(nodeOffset + 0x04, true),
-                pathBlockOffset: data.getInt32(nodeOffset + 0x08, true),
-                pathBlockLength: data.getInt32(nodeOffset + 0x0C, true),
-                pathStartIndex: data.getInt32(nodeOffset + 0x10, true),
-                pathSegment: ""
+            this.nodes[i] = {
+                offset: br.uint32(),
+                fileSize: br.uint32(),
+                nextNodeOffset: br.uint32(),
+                totalPathLength: br.uint32(),
+                pathStartIndex: br.uint32(),
             };
-
-            if(node.fileSize > 0) {
-                node.pathBlockLength--;
-            }
-
-            this.nodes[i] = node;
         }
 
-        return data.byteLength;
-    }
+        const indexBuffer = br.slice(indexBufferSize).createTypedArray(Uint8Array);
 
-    private parsePathTable(data: DataView): number {
-        for(let i = 0; i < this.pathTable.length; i++) {
-            this.pathTable[i] = PakArchive.charTable[data.getInt8(i)] ?? '?';
-        }
+        /*
+         * An array of offsets into the index buffer, each offset pointing  to the start of each string.
+         * Unused for now, because nodes have an offset into the buffer as well.
+         */
+        // const bufferOffset = br.slice(stringCount * 4).createTypedArray(Uint32Array);
+
 
         for(const node of this.nodes) {
-            let i = node.pathStartIndex;
-            while(i < this.pathTable.length && this.pathTable[i] !== '\0') {
-                node.pathSegment += this.pathTable[i++];
-            }
-        }
+            const start = node.pathStartIndex;
+            const end = indexBuffer.indexOf(0, start);
+            node.pathSegment = [...indexBuffer.slice(start, end)]
+                .map((i: number) => PakArchive.charTable[i])
+                .join('');
 
-        return data.byteLength;
+            node.isLeafNode = node.fileSize > 0;
+
+            const length = node.isLeafNode ? node.totalPathLength - 1 : node.totalPathLength;
+            node.isRootNode = node.pathSegment.length === length;
+        }
     }
 
-    private parseLenBlock(data: DataView): number {
-        //TODO: Figure out what this is, and what it's used for...
-        for(let i = 0; i < this.lenBlock.length; i++) {
-            this.lenBlock[i] = data.getInt32(0x04 * i, true);
-        }
-
-        return data.byteLength;
-    }
-
-    public getFileData(filepath: string): ArrayBufferSlice | null {
+    public getFile(filepath: string): ArrayBufferSlice | null {
         const node = this.findNode(filepath);
         if(node) {
-            return this.pakData.subarray(node.offset, node.fileSize);
+            //TODO: Write file to disk for caching?
+            return this.data.subarray(node.offset, node.fileSize);
         }
 
         return null;
     }
 
-    private findNode(filepath: string): PakNode | null {
-        return this.traverseToNode(filepath.toLowerCase().replaceAll('/', '\\'), "", 0)!;
+    private findNode(filepath: string): PakNode | undefined {
+        filepath = filepath.toLowerCase().replaceAll('/', '\\');
+        return this.traverseToNode(filepath, "", 0) ?? undefined;
     }
 
     private traverseToNode(remainingPath: string, pathSoFar: string, offset: number): PakNode | null {
         let index = PakArchive.charTable.indexOf(remainingPath[0]);
-        if(index < 0 || index >= this.pathTable.length) {
+        if(index < 0 || index + offset >= this.nodes.length) {
             return null;
         }
 
         index += offset;
+        const node = this.nodes[index];
 
-        let pathSegment = remainingPath[0] + this.nodes[index].pathSegment
+        let pathSegment = remainingPath[0] + node.pathSegment
         if(!remainingPath.startsWith(pathSegment)) {
             return null;
         }
 
         pathSoFar += pathSegment;
         remainingPath = remainingPath.substring(pathSegment.length);
-        if(pathSoFar.length != this.nodes[index].pathBlockLength + 1) {
+        if(pathSoFar.length === node.totalPathLength) {
+            return node;
+        } else if(remainingPath.length <= 0) {
             return null;
+        } else {
+            return this.traverseToNode(remainingPath, pathSoFar, this.nodes[index].nextNodeOffset);
         }
-
-        if(this.nodes[index].fileSize > 0) {
-            if(remainingPath.length !== 0) {
-                return null;
-            }
-
-            return this.nodes[index];
-        }
-
-        if(remainingPath.length < 1) {
-            return null;
-        }
-
-        return this.traverseToNode(remainingPath, pathSoFar, this.nodes[index].pathBlockOffset);
     }
 }
