@@ -1,18 +1,19 @@
-import { assert, readString } from "../util.js";
+import {assert} from "../util.js";
 import ArrayBufferSlice from "../ArrayBufferSlice";
 import {PakArchive} from "./PakArchive";
 import {BinaryReader} from "./Utils";
+import {Endianness} from "../endian";
 
 export enum SharkType {
-    EMPTY = 0,
-    INT,
-    INT_ARRAY,
-    FLOAT,
-    FLOAT_ARRAY,
-    STRING,
-    STRING_ARRAY,
-    OBJECT,
-    OBJECT_ARRAY,
+    EMPTY        = 0x00,
+    INT          = 0x01,
+    INT_ARRAY    = 0x02,
+    FLOAT        = 0x04,
+    FLOAT_ARRAY  = 0x08,
+    STRING       = 0x10,
+    STRING_ARRAY = 0x20,
+    OBJECT       = 0x40,
+    OBJECT_ARRAY = 0x80,
 }
 
 export class SharkFile {
@@ -50,7 +51,7 @@ export class SharkFile {
     }
 
     private parse(data: ArrayBufferSlice) {
-        const br = new BinaryReader(data, false)
+        const br = new BinaryReader(data, Endianness.BIG_ENDIAN)
 
         const magic = br.string0();
         const version = br.string0();
@@ -65,9 +66,8 @@ export class SharkFile {
 
         for(let i = 0; i < nodeCount; i++) {
             const name = this.retrieveString(br);
-            const code = br.uint8();
+            const type = br.uint8();
 
-            const type: SharkType = code ? Math.floor(Math.log2(code) + 1) : 0;
             switch(type) {
                 case SharkType.EMPTY:
                     node[name] = null;
