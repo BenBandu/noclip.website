@@ -1,30 +1,44 @@
 import ArrayBufferSlice from "../ArrayBufferSlice";
 import {assert} from "../util";
+import {Endianness} from "../endian";
 
-enum ESeekBehaviour {
-    GLOBAL,
-    LOCAL,
+export enum ESeekBehaviour {
+    START,
+    CURRENT,
+    END,
 }
+
+export type SchemaField<TStruct, TField> = TField | ((br: BinaryReader, self: Partial<TStruct>) => TField);
+export type StructSchema<T> = {[K in keyof T]: SchemaField<T, T[K]>};
 
 export class BinaryReader {
     private offset = 0;
     private readonly view : DataView;
-    private readonly littleEndian: boolean;
+    private readonly isLittleEndian: boolean;
+    private readonly endianness: Endianness;
+    private decoder : TextDecoder;
 
-    constructor(buffer: ArrayBufferSlice, littleEndian = true) {
+    constructor(buffer: ArrayBufferSlice, endianness: Endianness = Endianness.LITTLE_ENDIAN) {
         this.view = buffer.createDataView();
-        this.littleEndian = littleEndian;
+        this.decoder = new TextDecoder();
+        this.endianness = endianness;
+        this.isLittleEndian = endianness === Endianness.LITTLE_ENDIAN;
     }
 
-    seek(offset: number, seek: ESeekBehaviour = ESeekBehaviour.GLOBAL) {
+    seek(offset: number, seek: ESeekBehaviour = ESeekBehaviour.START) {
         switch (seek) {
-            case ESeekBehaviour.LOCAL:
-                this.offset += seek;
+            case ESeekBehaviour.CURRENT:
+                this.offset += offset;
                 break;
-            case ESeekBehaviour.GLOBAL:
+            case ESeekBehaviour.END:
+                this.offset = this.view.byteLength - offset;
+                break;
+            case ESeekBehaviour.START:
             default:
-                this.offset = seek;
+                this.offset = offset;
         }
+
+        assert(this.offset >= 0 && this.offset <= this.view.byteLength, "BinaryReader offset outside of buffer range");
     }
 
     tell() {
@@ -32,7 +46,7 @@ export class BinaryReader {
     }
 
     slice(length: number) {
-        const v = new ArrayBufferSlice(this.view.buffer, this.offset, length);
+        const v = new ArrayBufferSlice(this.view.buffer, this.view.byteOffset + this.offset, length);
         this.offset += length;
         return v;
     }
@@ -78,57 +92,60 @@ export class BinaryReader {
     }
 
     int16() {
-        const v = this.view.getInt16(this.offset, this.littleEndian);
+        const v = this.view.getInt16(this.offset, this.isLittleEndian);
         this.offset += 2;
         return v;
     }
 
     uint16(){
-        const v = this.view.getUint16(this.offset, this.littleEndian);
+        const v = this.view.getUint16(this.offset, this.isLittleEndian);
         this.offset += 2;
         return v;
     }
 
     int32() {
-        const v = this.view.getInt32(this.offset, this.littleEndian);
+        const v = this.view.getInt32(this.offset, this.isLittleEndian);
         this.offset += 4;
         return v;
     }
 
     uint32(){
-        const v = this.view.getUint32(this.offset, this.littleEndian);
+        const v = this.view.getUint32(this.offset, this.isLittleEndian);
         this.offset += 4;
         return v;
     }
 
     int64() {
-        const v = this.view.getBigUint64(this.offset, this.littleEndian);
+        const v = this.view.getBigUint64(this.offset, this.isLittleEndian);
         this.offset += 8;
         return v;
     }
 
     uint64(){
-        const v = this.view.getBigUint64(this.offset, this.littleEndian);
+        const v = this.view.getBigUint64(this.offset, this.isLittleEndian);
         this.offset += 8;
         return v;
     }
 
     float32() {
-        const v = this.view.getFloat32(this.offset, true);
+        const v = this.view.getFloat32(this.offset, this.isLittleEndian);
         this.offset += 4;
         return v;
     }
 
     float64() {
-        const v = this.view.getFloat64(this.offset, this.littleEndian);
+        const v = this.view.getFloat64(this.offset, this.isLittleEndian);
         this.offset += 8;
         return v;
     }
 
-    string(length: number) {
-        const b = new Uint8Array(this.view.buffer, this.offset, length);
-        this.offset += length;
-        return new TextDecoder().decode(b);
+    string(length: number, separator: string = '') {
+        let b = this.slice(length).createTypedArray(Uint8Array, 0, undefined, this.endianness)
+        let v = this.decoder.decode(b);
+        if(separator) {
+            v = v.split(separator)[0];
+        }
+        return v;
     }
 
     string0() {
@@ -141,6 +158,7 @@ export class BinaryReader {
         }
 
         const b = new Uint8Array(chars);
-        return new TextDecoder().decode(b);
+
+        return this.decoder.decode(b);
     }
 }
