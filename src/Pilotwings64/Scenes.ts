@@ -1,40 +1,57 @@
 
 import * as RDP from '../Common/N64/RDP.js';
 
-import {
-    GfxDevice, GfxBuffer, GfxInputLayout, GfxBufferUsage, GfxVertexAttributeDescriptor, GfxFormat, GfxVertexBufferFrequency,
-    GfxBindingLayoutDescriptor, GfxWrapMode, GfxMipFilterMode, GfxTexFilterMode,
-    GfxSampler, GfxBlendFactor, GfxBlendMode, GfxTexture, GfxMegaStateDescriptor, GfxInputLayoutBufferDescriptor, makeTextureDescriptor2D, GfxProgram, GfxVertexBufferDescriptor, GfxIndexBufferDescriptor,
-} from "../gfx/platform/GfxPlatform.js";
-import { SceneGfx, ViewerRenderInput, Texture } from "../viewer.js";
-import { SceneDesc, SceneContext, SceneGroup } from "../SceneBase.js";
-import ArrayBufferSlice from "../ArrayBufferSlice.js";
-import { readString, assert, hexzero, nArray } from "../util.js";
-import { decompress } from "../Common/Compression/MIO0.js";
-import { makeStaticDataBuffer } from "../gfx/helpers/BufferHelpers.js";
-import { DeviceProgram } from "../Program.js";
-import { GfxRenderInstManager, makeSortKey, GfxRendererLayer, setSortKeyDepth, getSortKeyLayer, GfxRenderInstList } from "../gfx/render/GfxRenderInstManager.js";
-import { fillMatrix4x3, fillMatrix4x4, fillMatrix4x2, fillVec4v, fillVec3v } from "../gfx/helpers/UniformBufferHelpers.js";
 import { mat4, vec3, vec4 } from "gl-matrix";
-import { GfxRenderHelper } from "../gfx/render/GfxRenderHelper.js";
-import { standardFullClearRenderPassDescriptor, makeAttachmentClearDescriptor, makeBackbufferDescSimple } from "../gfx/helpers/RenderGraphHelpers.js";
+import ArrayBufferSlice from "../ArrayBufferSlice.js";
+import { RSP_Geometry, TextureState, translateCullMode } from "../BanjoKazooie/f3dex.js";
+import { F3DEX_Program } from "../BanjoKazooie/render.js";
 import { CameraController } from "../Camera.js";
+import { colorNewFromRGBA } from '../Color.js';
+import { decompress } from "../Common/Compression/MIO0.js";
+import { ImageFormat, ImageSize, decodeTex_I4, decodeTex_I8, decodeTex_IA16, decodeTex_IA4, decodeTex_IA8, decodeTex_RGBA16, getImageFormatName, getImageSizeName } from "../Common/N64/Image.js";
+import { calcTextureScaleForShift } from '../Common/N64/RSP.js';
+import { DataFetcher } from "../DataFetcher.js";
 import { MathConstants, clamp, computeMatrixWithoutTranslation, scaleMatrix } from "../MathHelpers.js";
-import { TextureState, RSP_Geometry, translateCullMode } from "../BanjoKazooie/f3dex.js";
-import { ImageFormat, ImageSize, getImageFormatName, decodeTex_RGBA16, getImageSizeName, decodeTex_I4, decodeTex_I8, decodeTex_IA4, decodeTex_IA8, decodeTex_IA16 } from "../Common/N64/Image.js";
+import { DeviceProgram } from "../Program.js";
+import { SceneContext, SceneDesc, SceneGroup } from "../SceneBase.js";
+import { getCoeffHermite, getDerivativeCubic, getPointCubic, getPointHermite } from "../Spline.js";
 import { TextureMapping } from "../TextureHolder.js";
 import { Endianness } from "../endian.js";
-import { DataFetcher } from "../DataFetcher.js";
-import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
-import { getCoeffHermite, getDerivativeCubic, getPointCubic, getPointHermite } from "../Spline.js";
-import { SingleSelect, Panel, TIME_OF_DAY_ICON, COOL_BLUE_COLOR } from "../ui.js";
+import { createBufferFromData } from '../gfx/helpers/BufferHelpers.js';
 import { fullscreenMegaState, setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
-import { F3DEX_Program } from "../BanjoKazooie/render.js";
-import { calcTextureScaleForShift } from '../Common/N64/RSP.js';
-import { colorNewFromRGBA } from '../Color.js';
-import { GfxrAttachmentSlot } from '../gfx/render/GfxRenderGraph.js';
-import { convertToCanvas } from '../gfx/helpers/TextureConversionHelpers.js';
 import { GfxShaderLibrary } from '../gfx/helpers/GfxShaderLibrary.js';
+import { makeAttachmentClearDescriptor, makeBackbufferDescSimple, standardFullClearRenderPassDescriptor } from "../gfx/helpers/RenderGraphHelpers.js";
+import { fillMatrix4x2, fillMatrix4x3, fillMatrix4x4, fillVec3v, fillVec4v } from "../gfx/helpers/UniformBufferHelpers.js";
+import {
+    GfxBindingLayoutDescriptor,
+    GfxBlendFactor, GfxBlendMode,
+    GfxBuffer,
+    GfxBufferFrequencyHint,
+    GfxBufferUsage,
+    GfxDevice,
+    GfxFormat,
+    GfxIndexBufferDescriptor,
+    GfxInputLayout,
+    GfxInputLayoutBufferDescriptor,
+    GfxMegaStateDescriptor,
+    GfxMipFilterMode,
+    GfxProgram,
+    GfxSampler,
+    GfxTexFilterMode,
+    GfxTexture,
+    GfxVertexAttributeDescriptor,
+    GfxVertexBufferDescriptor,
+    GfxVertexBufferFrequency,
+    GfxWrapMode,
+    makeTextureDescriptor2D,
+} from "../gfx/platform/GfxPlatform.js";
+import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
+import { GfxrAttachmentSlot } from '../gfx/render/GfxRenderGraph.js';
+import { GfxRenderHelper } from "../gfx/render/GfxRenderHelper.js";
+import { GfxRenderInstList, GfxRenderInstManager, GfxRendererLayer, getSortKeyLayer, makeSortKey, setSortKeyDepth } from "../gfx/render/GfxRenderInstManager.js";
+import { COOL_BLUE_COLOR, Panel, SingleSelect, TIME_OF_DAY_ICON } from "../ui.js";
+import { assert, hexzero, nArray, readString } from "../util.js";
+import { SceneGfx, Texture, ViewerRenderInput } from "../viewer.js";
 
 interface Pilotwings64FSFileChunk {
     tag: string;
@@ -979,7 +996,7 @@ function parseUPWL(file: Pilotwings64FSFile): UPWL {
     return { windObjects, landingPads, bonusStar };
 }
 
-const enum Vehicle {
+enum Vehicle {
     HangGlider = 0,
     RocketBelt = 1,
     Gyrocopter = 2,
@@ -989,7 +1006,7 @@ const enum Vehicle {
     Birdman = 6,
 }
 
-const enum RotationAxis {
+enum RotationAxis {
     X = 0x78,
     Y = 0x79,
     Z = 0x7A,
@@ -1439,8 +1456,8 @@ class MeshData {
 
     constructor(cache: GfxRenderCache, public mesh: Mesh_Chunk) {
         const device = cache.device;
-        this.vertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, mesh.vertexData.buffer);
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, mesh.indexData.buffer);
+        this.vertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, mesh.vertexData.buffer);
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, mesh.indexData.buffer);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: F3DEX_Program.a_Position, bufferIndex: 0, format: GfxFormat.F32_RGB, bufferByteOffset: 0 * 0x04, },
@@ -1458,9 +1475,9 @@ class MeshData {
         });
 
         this.vertexBufferDescriptors = [
-            { buffer: this.vertexBuffer, byteOffset: 0 },
+            { buffer: this.vertexBuffer },
         ];
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0 };
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
     }
 
     public destroy(device: GfxDevice): void {
@@ -1607,7 +1624,7 @@ interface DecodeMaterialResult {
     combineOverride?: RDP.CombineParams;
 }
 
-const enum PilotwingsRSPFlag {
+enum PilotwingsRSPFlag {
     GOURAUD     = 1 << 1,
     CULL_FRONT  = 1 << 3,
     CULL_BACK   = 1 << 4,
@@ -1791,38 +1808,40 @@ const scratchMatrix = mat4.create();
 const texMatrixScratch = mat4.create();
 class MaterialInstance {
     public program: F3DEX_Program;
-    private hasTexture = false;
-    private hasPairedTexture = false;
+    private mainTextureData: TextureData | null = null;
+    private pairedTextureData: TextureData | null = null;
     private textureMappings: TextureMapping[] = nArray(2, () => new TextureMapping());
-    private uvtx: UVTX;
     private decodedMaterial: DecodeMaterialResult;
     private stateFlags: Partial<GfxMegaStateDescriptor>;
     private visible = true;
     private gfxProgram: GfxProgram | null = null;
 
     constructor(private materialData: MaterialData, texturePalette: TexturePalette, isEnv?: boolean, private isBillboard?: boolean) {
-        this.hasTexture = materialData.textureIndex < 0x0FFF;
+        const hasTexture = materialData.textureIndex < 0x0FFF;
         let modeInfo = materialData.rspModeInfo;
         if (!!isEnv)
             modeInfo &= ~PilotwingsRSPFlag.ZBUFFER;
-        if (this.hasTexture) {
-            const mainTextureData = texturePalette.get(materialData.textureIndex);
-            this.uvtx = mainTextureData.uvtx;
-            mainTextureData.fillTextureMapping(this.textureMappings[0]);
-            if (this.uvtx.pairedIndex !== undefined) {
-                this.hasPairedTexture = true;
-                assert(this.uvtx.levels.length > 1);
-                texturePalette.get(this.uvtx.pairedIndex).fillTextureMapping(this.textureMappings[1]);
-                if (this.uvtx.levels[0].usesPaired) {
+        if (hasTexture) {
+            this.mainTextureData = texturePalette.get(materialData.textureIndex);
+            this.mainTextureData.fillTextureMapping(this.textureMappings[0]);
+
+            const uvtx = this.mainTextureData.uvtx;
+            if (uvtx.pairedIndex !== undefined) {
+                assert(uvtx.levels.length > 1);
+                this.pairedTextureData = texturePalette.get(uvtx.pairedIndex);
+                this.pairedTextureData.fillTextureMapping(this.textureMappings[1]);
+
+                if (uvtx.levels[0].usesPaired) {
                     // the paired texture is actually loaded into the first tile,
                     // so swap the underlying texture and sampler
-                    assert(!this.uvtx.levels[1].usesPaired);
-                    this.textureMappings.reverse()
+                    assert(!uvtx.levels[1].usesPaired);
+                    this.textureMappings.reverse();
                 }
             }
-            this.decodedMaterial = decodeMaterial(modeInfo, true, this.uvtx.cutOutTransparent, this.uvtx.otherModeLByte);
-            const chosenCombine = (this.decodedMaterial.combineOverride) ? this.decodedMaterial.combineOverride : this.uvtx.combine;
-            this.program = new F3DEX_Program(this.uvtx.otherModeH, this.decodedMaterial.renderMode, chosenCombine);
+
+            this.decodedMaterial = decodeMaterial(modeInfo, true, uvtx.cutOutTransparent, uvtx.otherModeLByte);
+            const chosenCombine = (this.decodedMaterial.combineOverride) ? this.decodedMaterial.combineOverride : uvtx.combine;
+            this.program = new F3DEX_Program(uvtx.otherModeH, this.decodedMaterial.renderMode, chosenCombine);
         } else {
             this.decodedMaterial = decodeMaterial(modeInfo, false, true, 0);
             // const chosenCombine = (this.decodedMaterial.combineOverride) ? this.decodedMaterial.combineOverride : this.uvtx.combine;
@@ -1833,7 +1852,8 @@ class MaterialInstance {
         this.stateFlags.cullMode = translateCullMode(this.decodedMaterial.geoMode);
         this.program.defines.set('BONE_MATRIX_COUNT', '1');
         this.program.defines.set("USE_VERTEX_COLOR", "1");
-        if (this.hasTexture)
+
+        if (this.mainTextureData !== null)
             this.program.defines.set('USE_TEXTURE', '1');
         else // game actually sets 2 cycle mode for some reason, and enables shading
             this.program.defines.set('ONLY_VERTEX_COLOR', '1');
@@ -1862,10 +1882,11 @@ class MaterialInstance {
         } else
             offs += fillMatrix4x3(d, offs, modelMatrix);
 
-        if (this.hasTexture) {
+        if (this.mainTextureData !== null) {
+            const uvtx = this.mainTextureData.uvtx;
             renderInst.setSamplerBindingsFromTextureMappings(this.textureMappings);
-            let scaleS0 = calcTextureScaleForShift(this.uvtx.levels[0].shiftS);
-            let scaleT0 = calcTextureScaleForShift(this.uvtx.levels[0].shiftT);
+            let scaleS0 = calcTextureScaleForShift(uvtx.levels[0].shiftS);
+            let scaleT0 = calcTextureScaleForShift(uvtx.levels[0].shiftT);
             // should maybe be careful here because the G_TEXTURE command is overridden,
             // which could affect which tiles get used
             if (this.decodedMaterial.scaleOverride) {
@@ -1873,31 +1894,31 @@ class MaterialInstance {
                 scaleT0 /= this.decodedMaterial.scaleOverride;
             }
             mat4.fromScaling(texMatrixScratch,
-                [scaleS0 / this.textureMappings[0].width, scaleT0 / this.textureMappings[0].height, 1]);
-            if (this.uvtx.uvScroll) {
-                scrollTexture(texMatrixScratch, viewerInput.time, this.uvtx.uvScroll)
-            }
+                [scaleS0 / uvtx.width, scaleT0 / uvtx.height, 1]);
+            if (uvtx.uvScroll)
+                scrollTexture(texMatrixScratch, viewerInput.time, uvtx.uvScroll);
             offs += fillMatrix4x2(d, offs, texMatrixScratch);
 
-            if (this.hasPairedTexture) {
-                const scaleS1 = calcTextureScaleForShift(this.uvtx.levels[1].shiftS);
-                const scaleT1 = calcTextureScaleForShift(this.uvtx.levels[1].shiftT);
+            if (this.pairedTextureData !== null) {
+                const uvtx2 = this.pairedTextureData.uvtx;
+                const scaleS1 = calcTextureScaleForShift(uvtx.levels[1].shiftS);
+                const scaleT1 = calcTextureScaleForShift(uvtx.levels[1].shiftT);
                 mat4.fromScaling(texMatrixScratch,
-                    [scaleS1 / this.textureMappings[1].width, scaleT1 / this.textureMappings[1].height, 1]);
-                if (this.uvtx.combineScroll) {
-                    scrollTexture(texMatrixScratch, viewerInput.time, this.uvtx.combineScroll)
-                }
+                    [scaleS1 / uvtx2.width, scaleT1 / uvtx2.height, 1]);
+                if (uvtx.combineScroll)
+                    scrollTexture(texMatrixScratch, viewerInput.time, uvtx.combineScroll);
                 offs += fillMatrix4x2(d, offs, texMatrixScratch);
             }
         }
 
         offs = renderInst.allocateUniformBuffer(F3DEX_Program.ub_CombineParams, 8);
         const comb = renderInst.mapUniformBufferF32(F3DEX_Program.ub_CombineParams);
-        if (this.hasTexture) {
-            if (this.uvtx.primitive)
-                fillVec4v(comb, offs + 0x00, this.uvtx.primitive);
-            if (this.uvtx.environment)
-                fillVec4v(comb, offs + 0x04, this.uvtx.environment);
+        if (this.mainTextureData !== null) {
+            const uvtx = this.mainTextureData.uvtx;
+            if (uvtx.primitive)
+                fillVec4v(comb, offs + 0x00, uvtx.primitive);
+            if (uvtx.environment)
+                fillVec4v(comb, offs + 0x04, uvtx.environment);
         }
 
         if (this.gfxProgram === null)
@@ -1908,7 +1929,7 @@ class MaterialInstance {
     }
 }
 
-const enum TexCM {
+enum TexCM {
     WRAP = 0x00, MIRROR = 0x01, CLAMP = 0x02,
 }
 
@@ -1923,21 +1944,6 @@ function translateCM(cm: TexCM): GfxWrapMode {
 const bindingLayouts: GfxBindingLayoutDescriptor[] = [
     { numUniformBuffers: 3, numSamplers: 2 },
 ];
-
-function textureToCanvas(texture: UVTX): Texture {
-    const surfaces: HTMLCanvasElement[] = [];
-
-    for (let i = 0; i < texture.levels.length; i++) {
-        const level = texture.levels[i];
-        const canvas = convertToCanvas(ArrayBufferSlice.fromView(level.pixels), level.width, level.height);
-        surfaces.push(canvas);
-    }
-
-    const extraInfo = new Map<string, string>();
-    extraInfo.set('Format', `${getImageFormatName(texture.fmt)}${getImageSizeName(texture.siz)}`);
-
-    return { name: texture.name, extraInfo, surfaces };
-}
 
 class TextureData {
     public gfxTexture: GfxTexture;
@@ -1963,15 +1969,15 @@ class TextureData {
             minLOD: 0, maxLOD: 0,
         });
 
-        this.viewerTexture = textureToCanvas(uvtx);
+        const extraInfo = new Map<string, string>();
+        extraInfo.set('Format', `${getImageFormatName(texture.fmt)}${getImageSizeName(texture.siz)}`);
+
+        this.viewerTexture = { gfxTexture: this.gfxTexture, extraInfo };
     }
 
     public fillTextureMapping(m: TextureMapping): void {
         m.gfxTexture = this.gfxTexture;
         m.gfxSampler = this.gfxSampler;
-        m.width = this.uvtx.width;
-        m.height = this.uvtx.height;
-        m.lodBias = 0;
     }
 
     public destroy(device: GfxDevice): void {
@@ -2383,8 +2389,8 @@ class SnowRenderer {
         }
 
         const device = cache.device;
-        this.vertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, flakeVertices.buffer);
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, flakeIndices.buffer);
+        this.vertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, flakeVertices.buffer);
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, flakeIndices.buffer);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: SnowProgram.a_Position, bufferIndex: 0, format: GfxFormat.F32_RGB, bufferByteOffset: 0, },
@@ -2400,9 +2406,9 @@ class SnowRenderer {
         });
 
         this.vertexBufferDescriptors = [
-            { buffer: this.vertexBuffer, byteOffset: 0, },
+            { buffer: this.vertexBuffer },
         ];
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0 };
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
     }
 
     public prepareToRender(device: GfxDevice, renderInstManager: GfxRenderInstManager, viewerInput: ViewerRenderInput): void {
@@ -2473,10 +2479,10 @@ class DataHolder {
     public uven: UVEN[] = [];
     public uvtp: UVTP[] = [];
     public splineData = new Map<number, SPTH>();
-    public gfxRenderCache: GfxRenderCache;
+    public renderCache: GfxRenderCache;
 
     constructor(device: GfxDevice) {
-        this.gfxRenderCache = new GfxRenderCache(device);
+        this.renderCache = new GfxRenderCache(device);
     }
 
     public destroy(device: GfxDevice): void {
@@ -2486,7 +2492,7 @@ class DataHolder {
             this.uvmdData[i].destroy(device);
         for (let i = 0; i < this.uvctData.length; i++)
             this.uvctData[i].destroy(device);
-        this.gfxRenderCache.destroy();
+        this.renderCache.destroy();
     }
 }
 
@@ -2779,13 +2785,13 @@ async function fetchDataHolder(dataFetcher: DataFetcher, device: GfxDevice): Pro
         const file = fs.files[i];
         if (file.type === 'UVCT') {
             const uvct = parseUVCT(file);
-            dataHolder.uvctData.push(new UVCTData(dataHolder.gfxRenderCache, uvct));
+            dataHolder.uvctData.push(new UVCTData(dataHolder.renderCache, uvct));
         } else if (file.type === 'UVTX') {
             const uvtx = parseUVTX(file);
-            dataHolder.textureData.push(new TextureData(dataHolder.gfxRenderCache, uvtx));
+            dataHolder.textureData.push(new TextureData(dataHolder.renderCache, uvtx));
         } else if (file.type === 'UVMD') {
             const uvmd = parseUVMD(file);
-            dataHolder.uvmdData.push(new ModelData(dataHolder.gfxRenderCache, uvmd, dataHolder.uvmdData.length));
+            dataHolder.uvmdData.push(new ModelData(dataHolder.renderCache, uvmd, dataHolder.uvmdData.length));
         } else if (file.type === 'UVTR') {
             dataHolder.uvtr.push(parseUVTR(file));
         } else if (file.type === 'UVLV') {
@@ -2810,7 +2816,7 @@ async function fetchDataHolder(dataFetcher: DataFetcher, device: GfxDevice): Pro
     return dataHolder;
 }
 
-const enum PW64Pass { SKYBOX, NORMAL, SNOW }
+enum PW64Pass { SKYBOX, NORMAL, SNOW }
 
 const toNoclipSpace = mat4.create();
 mat4.fromXRotation(toNoclipSpace, -90 * MathConstants.DEG_TO_RAD);
@@ -2919,7 +2925,7 @@ class Pilotwings64Renderer implements SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListMain.reset();
         this.renderInstListSky.reset();
         this.renderInstListPost.reset();

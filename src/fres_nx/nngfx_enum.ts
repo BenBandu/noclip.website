@@ -1,17 +1,17 @@
 
-export const enum ImageStorageDimension {
+export enum ImageStorageDimension {
     _1D, _2D, _3D,
 }
 
-export const enum ImageDimension {
+export enum ImageDimension {
     _1D, _2D, _3D, CubeMap, _1DArray, _2DArray, _2DMultisample, _2DMultisampleArray, CubeMapArray,
 }
 
-export const enum TileMode {
+export enum TileMode {
     Optimal, Linear,
 }
 
-export const enum ChannelFormat {
+export enum ChannelFormat {
     Undefined,
     R4_G4,
     R8,
@@ -74,22 +74,22 @@ export const enum ChannelFormat {
     B5_G5_R5_A1,
 }
 
-export const enum TypeFormat {
+export enum TypeFormat {
     Undefined, Unorm, Snorm, Uint, Sint, Float, UnormSrgb, DepthStencil, UintToFloat, SintToFloat, Ufloat,
     $Bits = 8,
     $Mask = ((1 << $Bits) - 1),
 }
 
-export const enum IndexFormat {
+export enum IndexFormat {
     Uint8, Uint16, Uint32,
 }
 
-export const enum PrimitiveTopology {
+export enum PrimitiveTopology {
     // only one worth supporting...
     TriangleList = 0x03,
 }
 
-export const enum ImageFormat {
+export enum ImageFormat {
     Bc1_Unorm         = (ChannelFormat.Bc1         << TypeFormat.$Bits) | TypeFormat.Unorm,
     Bc1_UnormSrgb     = (ChannelFormat.Bc1         << TypeFormat.$Bits) | TypeFormat.UnormSrgb,
     Bc2_Unorm         = (ChannelFormat.Bc2         << TypeFormat.$Bits) | TypeFormat.Unorm,
@@ -104,12 +104,15 @@ export const enum ImageFormat {
     R8_G8_B8_A8_Unorm = (ChannelFormat.R8_G8_B8_A8 << TypeFormat.$Bits) | TypeFormat.Unorm,
 }
 
-export const enum AttributeFormat {
+export enum AttributeFormat {
+    _8_Unorm           = ((ChannelFormat.R8              << TypeFormat.$Bits) | TypeFormat.Unorm),
+    _8_Uint            = ((ChannelFormat.R8              << TypeFormat.$Bits) | TypeFormat.Uint),
     _8_8_Unorm         = ((ChannelFormat.R8_G8           << TypeFormat.$Bits) | TypeFormat.Unorm),
     _8_8_Snorm         = ((ChannelFormat.R8_G8           << TypeFormat.$Bits) | TypeFormat.Snorm),
     _8_8_Uint          = ((ChannelFormat.R8_G8           << TypeFormat.$Bits) | TypeFormat.Uint),
     _8_8_8_8_Unorm     = ((ChannelFormat.R8_G8_B8_A8     << TypeFormat.$Bits) | TypeFormat.Unorm),
     _8_8_8_8_Snorm     = ((ChannelFormat.R8_G8_B8_A8     << TypeFormat.$Bits) | TypeFormat.Snorm),
+    _8_8_8_8_Uint      = ((ChannelFormat.R8_G8_B8_A8     << TypeFormat.$Bits) | TypeFormat.Uint),
     _10_10_10_2_Snorm  = ((ChannelFormat.R10_G10_B10_A2  << TypeFormat.$Bits) | TypeFormat.Snorm),
     _16_16_Unorm       = ((ChannelFormat.R16_G16         << TypeFormat.$Bits) | TypeFormat.Unorm),
     _16_16_Snorm       = ((ChannelFormat.R16_G16         << TypeFormat.$Bits) | TypeFormat.Snorm),
@@ -127,11 +130,22 @@ export function getTypeFormat(format: ImageFormat | AttributeFormat): TypeFormat
     return format & TypeFormat.$Mask;
 }
 
-export const enum TextureAddressMode {
+export enum TextureAddressMode {
     Repeat, Mirror, ClampToEdge, ClampToBorder, MirrorClampToEdge,
 }
 
-export const enum FilterMode {
+export enum CompareMode {
+    Never,
+    Less,
+    Equal,
+    LessOrEqual,
+    Greater,
+    NotEqual,
+    GreaterOrEqual,
+    Always,
+}
+
+export enum FilterMode {
     Point  = 1 << 0,
     Linear = 1 << 1,
     MipShift = 0, MagShift = 2, MinShift = 4,
@@ -149,3 +163,7 @@ export const enum FilterMode {
     Minimum     = 1 << 8,
     Maximum     = 1 << 9,
 };
+
+export enum ChannelSource {
+    Zero, One, Red, Green, Blue, Alpha,
+}

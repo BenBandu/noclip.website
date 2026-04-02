@@ -4,9 +4,9 @@ import * as UI from '../ui.js';
 import * as Geo from '../BanjoKazooie/geo.js';
 import * as BYML from '../byml.js';
 
-import { GfxDevice, GfxBufferUsage } from '../gfx/platform/GfxPlatform.js';
+import { GfxDevice, GfxBufferUsage, GfxBufferFrequencyHint } from '../gfx/platform/GfxPlatform.js';
 import { FakeTextureHolder, TextureHolder } from '../TextureHolder.js';
-import { textureToCanvas, RenderData, GeometryData, BoneAnimator, AnimationMode } from '../BanjoKazooie/render.js';
+import { RenderData, GeometryData, BoneAnimator, AnimationMode } from '../BanjoKazooie/render.js';
 import { GeometryRenderer, layerFromFlags, BTLayer, LowObjectFlags } from './render.js';
 import { makeBackbufferDescSimple, opaqueBlackFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers.js';
 import { SceneContext } from '../SceneBase.js';
@@ -20,8 +20,8 @@ import { DataFetcher, AbortedCallback } from '../DataFetcher.js';
 import { MathConstants, computeModelMatrixSRT } from '../MathHelpers.js';
 import { vec3, mat4, vec4 } from 'gl-matrix';
 import { parseAnimationFile } from '../BanjoKazooie/scenes.js';
-import { makeStaticDataBuffer } from '../gfx/helpers/BufferHelpers.js';
 import { GfxrAttachmentSlot } from '../gfx/render/GfxRenderGraph.js';
+import { createBufferFromData } from '../gfx/helpers/BufferHelpers.js';
 
 const pathBase = `BanjoTooie`;
 
@@ -33,7 +33,7 @@ class BTRenderer implements Viewer.SceneGfx {
     public renderInstListSky = new GfxRenderInstList();
     public renderInstListMain = new GfxRenderInstList();
 
-    constructor(device: GfxDevice, public textureHolder: TextureHolder<any>, public modelCache: ModelCache, public id: string) {
+    constructor(device: GfxDevice, public textureHolder: TextureHolder, public modelCache: ModelCache, public id: string) {
         this.renderHelper = new GfxRenderHelper(device);
     }
 
@@ -116,7 +116,7 @@ class BTRenderer implements Viewer.SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListSky.reset();
         this.renderInstListMain.reset();
     }
@@ -196,7 +196,7 @@ class ModelCache {
     public archivePromiseCache = new Map<string, Promise<ActorArchive | StaticArchive | CRG1File | null>>();
     public archiveCache = new Map<string, ActorArchive | StaticArchive | CRG1File | null>();
     public archiveDataHolder = new Map<number, GeometryData>();
-    public cache: GfxRenderCache;
+    public renderCache: GfxRenderCache;
 
     public static staticGeometryFlag = 0x1000;
     public static staticFlipbookFlag = 0x2000;
@@ -207,7 +207,7 @@ class ModelCache {
     }
 
     constructor(public device: GfxDevice, private pathBase: string, private dataFetcher: DataFetcher) {
-        this.cache = new GfxRenderCache(device);
+        this.renderCache = new GfxRenderCache(device);
     }
 
     public waitForLoad(): Promise<void> {
@@ -284,7 +284,7 @@ class ModelCache {
             undefined, // actors don't have external textures
             !!(lowFlags & (LowObjectFlags.AltVerts | LowObjectFlags.AltVerts2)), // only used for jinjos right now
         );
-        const data = new GeometryData(this.device, this.cache, geo, id);
+        const data = new GeometryData(this.device, this.renderCache, geo, id);
         this.archiveDataHolder.set(id, data);
         return data;
     }
@@ -302,11 +302,11 @@ class ModelCache {
         const arc = this.getActorArchive(id);
         if (arc.Variants) {
             const geo = Geo.parseBT(findFileByID(arc, arc.Variants[variant])!.Data, Geo.RenderZMode.OPA);
-            data = new GeometryData(this.device, this.cache, geo, id);
+            data = new GeometryData(this.device, this.renderCache, geo, id);
         } else if (arc.Palettes) {
             // make a new copy, though we could reuse index buffer
-            data = new GeometryData(this.device, this.cache, baseData.geo, id);
-            applyPaletteSwap(this.device, this.cache, data, findFileByID(arc, arc.Palettes![variant])!.Data);
+            data = new GeometryData(this.device, this.renderCache, baseData.geo, id);
+            applyPaletteSwap(this.device, this.renderCache, data, findFileByID(arc, arc.Palettes![variant])!.Data);
         } else
             throw `bad variant ${hexzero(id, 3)}:${variant}`;
 
@@ -320,7 +320,7 @@ class ModelCache {
 
         const arc = this.getFile(id);
         const geo = Geo.parseBT(arc.Data, Geo.RenderZMode.OPA);
-        const data = new GeometryData(this.device, this.cache, geo, id);
+        const data = new GeometryData(this.device, this.renderCache, geo, id);
         this.archiveDataHolder.set(id | ModelCache.fileIDFlag, data);
         return data;
     }
@@ -338,13 +338,13 @@ class ModelCache {
             return null;
 
         const geo = Geo.parseBT(findFileByID(arc, modelID)!.Data, Geo.RenderZMode.OPA);
-        const data = new GeometryData(this.device, this.cache, geo, id | flag);
+        const data = new GeometryData(this.device, this.renderCache, geo, id | flag);
         this.archiveDataHolder.set(id | flag, data);
         return data;
     }
 
     public destroy(device: GfxDevice): void {
-        this.cache.destroy();
+        this.renderCache.destroy();
         for (const data of this.archiveDataHolder.values())
             data.renderData.destroy(device);
     }
@@ -376,7 +376,7 @@ function applyPaletteSwap(device: GfxDevice, cache: GfxRenderCache, base: Geomet
 
     device.destroyBuffer(base.renderData.vertexBuffer);
 
-    base.renderData.vertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, base.renderData.vertexBufferData.buffer);
+    base.renderData.vertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, base.renderData.vertexBufferData.buffer);
     base.renderData.vertexBufferDescriptors[0].buffer = base.renderData.vertexBuffer;
 }
 
@@ -462,6 +462,8 @@ async function addObjects(view: DataView, offs: number, renderer: BTRenderer): P
             scale = .2;
         else if (id === 0x343)
             scale = .05;
+        else if (id === 0x2af)
+            scale = 1; // torch in flooded caves
 
         const arc = renderer.modelCache.getActorArchive(id);
         const defView = arc.Definition.createDataView();
@@ -587,11 +589,12 @@ class SceneDesc implements Viewer.SceneDesc {
     }
 
     private addGeo(device: GfxDevice, cache: GfxRenderCache, viewerTextures: Viewer.Texture[], sceneRenderer: BTRenderer, geo: Geo.Geometry<Geo.BTGeoNode>): GeometryRenderer {
-        for (let i = 0; i < geo.sharedOutput.textureCache.textures.length; i++)
-            viewerTextures.push(textureToCanvas(geo.sharedOutput.textureCache.textures[i]));
-
         const geoData = new GeometryData(device, cache, geo);
         sceneRenderer.geoDatas.push(geoData.renderData);
+
+        for (let i = 0; i < geoData.renderData.textures.length; i++)
+            viewerTextures.push({ gfxTexture: geoData.renderData.textures[i] });
+
         const geoRenderer = new GeometryRenderer(device, geoData);
         sceneRenderer.geoRenderers.push(geoRenderer);
         return geoRenderer;

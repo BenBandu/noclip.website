@@ -449,7 +449,7 @@ function readSceneBin(buffer: ArrayBufferSlice): SceneBinObj {
     }
 }
 
-export const enum SMSPass {
+export enum SMSPass {
     SKYBOX = 1 << 0,
     MAIN = 1 << 1,
     INDIRECT = 1 << 2,
@@ -613,7 +613,7 @@ export class SunshineRenderer implements Viewer.SceneGfx {
                 pass.attachResolveTexture(opaqueSceneTextureID);
 
                 pass.exec((passRenderer, scope) => {
-                    this.renderInstListInd.resolveLateSamplerBinding('opaque-scene-texture', { gfxTexture: scope.getResolveTextureForID(opaqueSceneTextureID), gfxSampler: null, lateBinding: null });
+                    this.renderInstListInd.resolveLateSamplerBinding('opaque-scene-texture', { gfxTexture: scope.getResolveTextureForID(opaqueSceneTextureID), gfxSampler: null });
                     this.renderInstListInd.drawOnPassRenderer(this.renderHelper.renderCache, passRenderer);
                 });
             });
@@ -623,7 +623,7 @@ export class SunshineRenderer implements Viewer.SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.renderHelper.prepareToRender();
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListSky.reset();
         this.renderInstListMain.reset();
         this.renderInstListInd.reset();
@@ -933,7 +933,7 @@ export class SunshineSceneDesc implements Viewer.SceneDesc {
 { k: 'SandLeafBase03', m: 'SandLeafBase03.bmd' },
 { k: 'SandLeaf', m: 'SandLeaf.bmd', n: 'sandleaf_wait', u: 0 },
 { k: 'ShellCup', m: 'ShellCup.bmd', n: 'shellcup', u: 0 },
-{ k: 'shine' },
+{ k: 'shine', m: 'shine.bmd', n: 'shine_float', u: 0 },
 { k: 'SignCircle', m: 'maru_sign.bmd' },
 { k: 'SignCross', m: 'batu_sign.bmd' },
 { k: 'SignTriangle', m: '3kaku_sign.bmd' },

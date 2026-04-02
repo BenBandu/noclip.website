@@ -233,7 +233,7 @@ class BARRenderer implements SceneGfx {
     public prepareToRender(device: GfxDevice, viewerInput: ViewerRenderInput): void {
         viewerInput.camera.setClipPlanes(0.1);
 
-        this.renderHelper.debugDraw.beginFrame(viewerInput.camera.projectionMatrix, viewerInput.camera.viewMatrix, viewerInput.backbufferHeight, viewerInput.backbufferHeight);
+        this.renderHelper.debugDraw.beginFrame(viewerInput.camera.projectionMatrix, viewerInput.camera.viewMatrix, viewerInput.backbufferWidth, viewerInput.backbufferHeight);
 
         // Update animations
         let deltaTimeSecs = viewerInput.deltaTime / 1000;
@@ -304,7 +304,7 @@ class BARRenderer implements SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListMain.reset();
     }
 

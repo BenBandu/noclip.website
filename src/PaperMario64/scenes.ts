@@ -76,7 +76,7 @@ class PaperMario64Renderer implements Viewer.SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListMain.reset();
     }
 
@@ -335,7 +335,7 @@ class PaperMario64SceneDesc implements Viewer.SceneDesc {
         if (arc.BGTexFile !== null) {
             const bgName = arc.BGTexName;
             const bgTexture = Tex.parseBackground(arc.BGTexFile, bgName);
-            renderer.textureHolder.addTextures(device, [bgTexture]);
+            renderer.textureHolder.addTexture(device, bgTexture);
             renderer.bgTextureRenderer = new BackgroundBillboardRenderer(renderer.renderHelper.renderCache, renderer.textureHolder, bgName);
         }
 

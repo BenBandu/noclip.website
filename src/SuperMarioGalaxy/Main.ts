@@ -9,8 +9,7 @@ import { SceneContext } from '../SceneBase.js';
 import * as Viewer from '../viewer.js';
 import * as UI from '../ui.js';
 
-import { TextureMapping } from '../TextureHolder.js';
-import { TransparentBlack } from '../Color.js';
+import { colorNewCopy, TransparentBlack } from '../Color.js';
 import { GfxDevice, GfxRenderPass, GfxTexture, GfxFormat, GfxSampler, GfxTexFilterMode, GfxMipFilterMode, GfxWrapMode, GfxClipSpaceNearZ } from '../gfx/platform/GfxPlatform.js';
 import { GfxRenderInstList } from '../gfx/render/GfxRenderInstManager.js';
 import { GfxRenderCache } from '../gfx/render/GfxRenderCache.js';
@@ -19,7 +18,7 @@ import { setBackbufferDescSimple, standardFullClearRenderPassDescriptor } from '
 import { gfxDeviceNeedsFlipY } from '../gfx/helpers/GfxDeviceHelpers.js';
 import { projectionMatrixConvertClipSpaceNearZ } from '../gfx/helpers/ProjectionHelpers.js';
 
-import { SceneParams,  ub_SceneParamsBufferSize, fillSceneParamsData, calcLODBias } from '../gx/gx_render.js';
+import { SceneParams,  ub_SceneParamsBufferSize, fillSceneParamsData, calcLODBias, GXTextureMapping } from '../gx/gx_render.js';
 import { EFB_WIDTH, EFB_HEIGHT, GX_Program } from '../gx/gx_material.js';
 import { GXRenderHelperGfx } from '../gx/gx_render.js';
 
@@ -76,7 +75,7 @@ function isExistPriorDrawAir(sceneObjHolder: SceneObjHolder): boolean {
         return false;
 }
 
-export const enum SpecialTextureType {
+export enum SpecialTextureType {
     OpaqueSceneTexture = 'opaque-scene-texture',
     AstroMapBoard = 'astro-map-board',
     MarioShadowTexture = `mario-shadow-texture`,
@@ -84,7 +83,7 @@ export const enum SpecialTextureType {
 
 class SpecialTextureBinder {
     private clampSampler: GfxSampler;
-    private textureMapping = new Map<SpecialTextureType, TextureMapping>();
+    private textureMapping = new Map<SpecialTextureType, GXTextureMapping>();
     private needsFlipY = false;
     private transparentTexture: GfxTexture;
 
@@ -104,18 +103,19 @@ class SpecialTextureBinder {
         this.registerSpecialTextureType(SpecialTextureType.MarioShadowTexture, this.clampSampler);
 
         this.transparentTexture = makeSolidColorTexture2D(device, TransparentBlack);
+        device.setResourceName(this.transparentTexture, 'MarioShadowTexture Dummy');
         this.lateBindTexture(SpecialTextureType.MarioShadowTexture, this.transparentTexture);
 
         this.needsFlipY = gfxDeviceNeedsFlipY(device);
     }
 
     private registerSpecialTextureType(textureType: SpecialTextureType, gfxSampler: GfxSampler): void {
-        const m = new TextureMapping();
+        const m = new GXTextureMapping();
         m.gfxSampler = gfxSampler;
         this.textureMapping.set(textureType, m);
     }
 
-    public registerTextureMapping(m: TextureMapping, textureType: SpecialTextureType): void {
+    public registerTextureMapping(m: GXTextureMapping, textureType: SpecialTextureType): void {
         m.width = EFB_WIDTH;
         m.height = EFB_HEIGHT;
         m.flipY = this.needsFlipY;
@@ -160,6 +160,8 @@ export class SMGRenderer implements Viewer.SceneGfx {
     private maskDesc = new GfxrRenderTargetDescription(GfxFormat.U8_R_NORM);
 
     constructor(private renderHelper: GXRenderHelperGfx, private spawner: SMGSpawner, private sceneObjHolder: SceneObjHolder) {
+        this.mainColorDesc.clearColor = colorNewCopy(TransparentBlack);
+
         this.textureHolder = this.sceneObjHolder.modelCache.textureListHolder;
 
         if (this.sceneObjHolder.sceneDesc.scenarioOverride !== null)
@@ -275,6 +277,7 @@ export class SMGRenderer implements Viewer.SceneGfx {
         const effectSystem = this.sceneObjHolder.effectSystem;
 
         const renderInstManager = this.renderHelper.renderInstManager;
+        const device = this.sceneObjHolder.modelCache.device;
 
         for (let drawType = DrawType.EffectDraw3D; drawType <= DrawType.EffectDrawAfterImageEffect; drawType++) {
             renderInstManager.setCurrentList(this.sceneObjHolder.sceneNameObjListExecutor.ensureRenderInstListExecute(drawType));
@@ -288,26 +291,30 @@ export class SMGRenderer implements Viewer.SceneGfx {
             }
 
             effectSystem.setDrawInfo(viewerInput.camera.viewMatrix, viewerInput.camera.projectionMatrix, texPrjMtx, viewerInput.camera.frustum);
-            effectSystem.drawEmitters(this.sceneObjHolder.modelCache.device, this.renderHelper.renderInstManager, drawType);
+            effectSystem.drawEmitters(device, this.renderHelper.renderInstManager, drawType);
 
             this.renderHelper.renderInstManager.popTemplate();
         }
+
+        effectSystem.prepareToRender(device);
     }
 
-    private executeOnPass(passRenderer: GfxRenderPass, list: GfxRenderInstList | null): void {
-        if (list === null)
+    private executeOnPass(passRenderer: GfxRenderPass, list: GfxRenderInstList | null, name: string): void {
+        if (list === null || list.renderInsts.length === 0)
             return;
         this.sceneObjHolder.specialTextureBinder.resolveLateBindTexture(list);
         const cache = this.renderHelper.renderInstManager.gfxRenderCache;
+        passRenderer.pushDebugGroup(name);
         list.drawOnPassRenderer(cache, passRenderer);
+        passRenderer.popDebugGroup();
     }
 
     private drawOpa(passRenderer: GfxRenderPass, drawBufferType: DrawBufferType): void {
-        this.executeOnPass(passRenderer, this.sceneObjHolder.sceneNameObjListExecutor.getRenderInstListOpa(drawBufferType));
+        this.executeOnPass(passRenderer, this.sceneObjHolder.sceneNameObjListExecutor.getRenderInstListOpa(drawBufferType), `${DrawBufferType[drawBufferType]} Opa`);
     }
 
     private drawXlu(passRenderer: GfxRenderPass, drawBufferType: DrawBufferType): void {
-        this.executeOnPass(passRenderer, this.sceneObjHolder.sceneNameObjListExecutor.getRenderInstListXlu(drawBufferType));
+        this.executeOnPass(passRenderer, this.sceneObjHolder.sceneNameObjListExecutor.getRenderInstListXlu(drawBufferType), `${DrawBufferType[drawBufferType]} Xlu`);
     }
 
     private hasAnyRenderInstList(renderInstList: GfxRenderInstList | null): boolean {
@@ -326,7 +333,7 @@ export class SMGRenderer implements Viewer.SceneGfx {
     }
 
     private execute(passRenderer: GfxRenderPass, drawType: DrawType): void {
-        this.executeOnPass(passRenderer, this.sceneObjHolder.sceneNameObjListExecutor.getRenderInstListExecute(drawType));
+        this.executeOnPass(passRenderer, this.sceneObjHolder.sceneNameObjListExecutor.getRenderInstListExecute(drawType), `${DrawType[drawType]} Exec`);
     }
 
     private executeMovementList(): void {
@@ -460,7 +467,7 @@ export class SMGRenderer implements Viewer.SceneGfx {
         // Prepare all of our NameObjs.
         executor.calcViewAndEntry(sceneObjHolder, DrawCameraType.DrawCameraType_3D, viewerInput);
         executor.calcViewAndEntry(sceneObjHolder, DrawCameraType.DrawCameraType_2D, viewerInput);
-        sceneObjHolder.debugDraw.beginFrame(viewerInput.camera.projectionMatrix, viewerInput.camera.viewMatrix, viewerInput.backbufferHeight, viewerInput.backbufferHeight);
+        sceneObjHolder.debugDraw.beginFrame(viewerInput.camera.projectionMatrix, viewerInput.camera.viewMatrix, viewerInput.backbufferWidth, viewerInput.backbufferHeight);
 
         // Draw our render insts.
         const template = renderInstManager.pushTemplate();
@@ -477,7 +484,6 @@ export class SMGRenderer implements Viewer.SceneGfx {
         renderInstManager.popTemplate();
 
         setBackbufferDescSimple(this.mainColorDesc, viewerInput);
-        this.mainColorDesc.clearColor = TransparentBlack;
 
         this.mainDepthDesc.copyDimensions(this.mainColorDesc);
         this.mainDepthDesc.clearDepth = standardFullClearRenderPassDescriptor.clearDepth!;
@@ -596,7 +602,7 @@ export class SMGRenderer implements Viewer.SceneGfx {
         });
 
         builder.pushPass((pass) => {
-            pass.setDebugName('Main Opaque');
+            pass.setDebugName('Main');
             const shadowColorTextureID = builder.resolveRenderTarget(shadowColorTargetID);
             pass.attachResolveTexture(shadowColorTextureID);
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, mainColorTargetID);
@@ -817,7 +823,7 @@ export class SMGRenderer implements Viewer.SceneGfx {
 
         this.renderHelper.prepareToRender();
 
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         sceneObjHolder.sceneNameObjListExecutor.reset();
     }
 
@@ -849,20 +855,28 @@ function getLayerDirName(index: LayerId) {
     }
 }
 
-class TextureListHolder {
-    public viewerTextures: Viewer.Texture[] = [];
-    public onnewtextures: (() => void) | null = null;
+class TextureListHolder implements UI.TextureListHolder {
+    private viewerTextures: Viewer.Texture[] = [];
+    public onnewtextures: (() => void) = (() => {});
+
+    public get textureNames(): string[] {
+        return this.viewerTextures.map((texture) => texture.gfxTexture.ResourceName!);
+    }
+
+    public async getViewerTexture(i: number) {
+        return this.viewerTextures[i];
+    }
 
     public addTextures(textures: Viewer.Texture[]): void {
         let changed = false;
         for (let i = 0; i < textures.length; i++) {
-            if (this.viewerTextures.find((texture) => textures[i].name === texture.name) === undefined) {
-                spliceBisectRight(this.viewerTextures, textures[i], (a, b) => a.name.localeCompare(b.name));
+            if (this.viewerTextures.find((texture) => textures[i].gfxTexture.ResourceName === texture.gfxTexture.ResourceName) === undefined) {
+                spliceBisectRight(this.viewerTextures, textures[i], (a, b) => a.gfxTexture.ResourceName!.localeCompare(b.gfxTexture.ResourceName!));
                 changed = true;
             }
         }
 
-        if (changed && this.onnewtextures !== null)
+        if (changed)
             this.onnewtextures();
     }
 }
@@ -874,13 +888,13 @@ export class ModelCache {
     public archiveLayoutHolder = new Map<string, LayoutHolder>();
     public extraDataPromiseCache = new Map<string, Promise<ArrayBufferSlice>>();
     public extraDataCache = new Map<string, ArrayBufferSlice>();
-    public cache: GfxRenderCache;
+    public renderCache: GfxRenderCache;
     public textureListHolder = new TextureListHolder();
     public gameSystemFontHolder: GameSystemFontHolder | null = null;
     public particleResourceHolder: ParticleResourceHolder | null = null;
 
     constructor(public device: GfxDevice, private pathBase: string, private dataFetcher: DataFetcher) {
-        this.cache = new GfxRenderCache(device);
+        this.renderCache = new GfxRenderCache(device);
     }
 
     public waitForLoad(): Promise<void> {
@@ -968,7 +982,7 @@ export class ModelCache {
             return this.archiveResourceHolder.get(objectName)!;
 
         const arc = this.getObjectData(objectName);
-        const resourceHolder = new ResourceHolder(this.device, this.cache, objectName, arc);
+        const resourceHolder = new ResourceHolder(this.device, this.renderCache, objectName, arc);
         this.textureListHolder.addTextures(resourceHolder.viewerTextures);
         this.archiveResourceHolder.set(objectName, resourceHolder);
         return resourceHolder;
@@ -992,13 +1006,14 @@ export class ModelCache {
 
         const arc = this.getLayoutData(layoutName);
         const gameSystemFontHolder = this.ensureGameSystemFontHolder();
-        const layoutHolder = new LayoutHolder(this.device, this.cache, gameSystemFontHolder, layoutName, arc);
+        const layoutHolder = new LayoutHolder(this.device, this.renderCache, gameSystemFontHolder, layoutName, arc);
+        this.textureListHolder.addTextures(layoutHolder.viewerTextures);
         this.archiveLayoutHolder.set(layoutName, layoutHolder);
         return layoutHolder;
     }
 
     public destroy(device: GfxDevice): void {
-        this.cache.destroy();
+        this.renderCache.destroy();
         for (const resourceHolder of this.archiveResourceHolder.values())
             resourceHolder.destroy(device);
         for (const layoutHolder of this.archiveLayoutHolder.values())
@@ -1064,7 +1079,7 @@ class AreaObjContainer extends NameObj {
     }
 }
 
-export const enum SceneObj {
+export enum SceneObj {
     SensorHitChecker               = 0x00,
     CollisionDirector              = 0x01,
     ClippingDirector               = 0x02,
@@ -1883,7 +1898,7 @@ export abstract class SMGSceneDescBase implements Viewer.SceneDesc {
             return new ModelCache(device, this.pathBase, context.dataFetcher);
         });
 
-        const renderHelper = new GXRenderHelperGfx(device, context, modelCache.cache);
+        const renderHelper = new GXRenderHelperGfx(device, context, modelCache.renderCache);
         context.destroyablePool.push(renderHelper);
 
         const galaxyName = this.galaxyName;

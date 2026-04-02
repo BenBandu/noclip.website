@@ -1,29 +1,28 @@
 
 import { mat4, ReadonlyMat4, vec3 } from "gl-matrix";
 import { CameraController } from "../Camera.js";
-import { Color, colorCopy, colorNewCopy, colorNewFromRGBA, Magenta, White } from "../Color.js";
+import { Color, colorCopy, colorNewCopy, colorNewFromRGBA, White } from "../Color.js";
 import { AABB } from "../Geometry.js";
 import { fullscreenMegaState, setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
-import { makeBackbufferDescSimple, standardFullClearRenderPassDescriptor } from "../gfx/helpers/RenderGraphHelpers.js";
 import { GfxShaderLibrary } from "../gfx/helpers/GfxShaderLibrary.js";
+import { makeBackbufferDescSimple, standardFullClearRenderPassDescriptor } from "../gfx/helpers/RenderGraphHelpers.js";
 import { fillColor, fillMatrix4x3, fillMatrix4x4, fillVec3v, fillVec4, fillVec4v } from "../gfx/helpers/UniformBufferHelpers.js";
-import { GfxBindingLayoutDescriptor, GfxBlendFactor, GfxBlendMode, GfxCullMode, GfxDevice, GfxFormat, GfxRenderProgramDescriptor, GfxMegaStateDescriptor, GfxMipFilterMode, GfxTexFilterMode, GfxWrapMode } from "../gfx/platform/GfxPlatform.js";
-import { GfxProgram, GfxSampler } from "../gfx/platform/GfxPlatformImpl.js";
+import { GfxBindingLayoutDescriptor, GfxBlendFactor, GfxBlendMode, GfxCullMode, GfxDevice, GfxFormat, GfxMegaStateDescriptor, GfxMipFilterMode, GfxProgram, GfxRenderProgramDescriptor, GfxSampler, GfxTexFilterMode, GfxWrapMode } from "../gfx/platform/GfxPlatform.js";
+import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
 import { GfxrAttachmentSlot, GfxrRenderTargetDescription } from "../gfx/render/GfxRenderGraph.js";
 import { GfxRenderHelper } from "../gfx/render/GfxRenderHelper.js";
 import { GfxRendererLayer, GfxRenderInst, GfxRenderInstList, GfxRenderInstManager, makeSortKey, setSortKeyDepth } from "../gfx/render/GfxRenderInstManager.js";
+import { preprocessShader_GLSL } from "../gfx/shaderc/GfxShaderCompiler.js";
+import { hashCodeNumberUpdate, HashMap } from "../HashMap.js";
 import { setMatrixTranslation } from "../MathHelpers.js";
 import { DeviceProgram } from "../Program.js";
+import { UberShaderInstance, UberShaderTemplate } from "../SourceEngine/UberShader.js";
 import { TextureMapping } from "../TextureHolder.js";
 import { nArray } from "../util.js";
 import { SceneGfx, ViewerRenderInput } from "../viewer.js";
 import { Asset_Type, Material_Flags, Material_Type, Mesh_Asset, Render_Material, Texture_Asset } from "./Assets.js";
 import { Entity_World, Lightmap_Table } from "./Entity.js";
 import { TheWitnessGlobals } from "./Globals.js";
-import { UberShaderInstance, UberShaderTemplate } from "../SourceEngine/UberShader.js";
-import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
-import { preprocessShader_GLSL } from "../gfx/shaderc/GfxShaderCompiler.js";
-import { hashCodeNumberUpdate, HashMap } from "../HashMap.js";
 
 class DepthCopyProgram extends DeviceProgram {
     public override vert = GfxShaderLibrary.fullscreenVS;
@@ -75,7 +74,7 @@ class TheWitnessShaderTemplate extends UberShaderTemplate<Render_Material> {
 
     public generateProgramString(m: Render_Material): string {
         return `
-precision mediump float;
+precision highp float;
 
 ${GfxShaderLibrary.MatrixLibrary}
 
@@ -668,7 +667,7 @@ class Device_Material {
     public megaStateFlags: Partial<GfxMegaStateDescriptor> = {};
 
     constructor(globals: TheWitnessGlobals, public render_material: Render_Material) {
-        const wrap_sampler = globals.cache.createSampler({
+        const wrap_sampler = globals.renderCache.createSampler({
             minFilter: GfxTexFilterMode.Bilinear,
             magFilter: GfxTexFilterMode.Bilinear,
             mipFilter: GfxMipFilterMode.Linear,
@@ -676,7 +675,7 @@ class Device_Material {
             wrapT: GfxWrapMode.Repeat,
         });
 
-        const clamp_sampler = globals.cache.createSampler({
+        const clamp_sampler = globals.renderCache.createSampler({
             minFilter: GfxTexFilterMode.Bilinear,
             magFilter: GfxTexFilterMode.Bilinear,
             mipFilter: GfxMipFilterMode.Linear,
@@ -704,7 +703,7 @@ class Device_Material {
         this.load_texture(globals, 10, 'white', clamp_sampler);
 
         this.shader_instance = globals.device_material_cache.create_shader_instance(this.render_material);
-        this.gfx_program = this.shader_instance.getGfxProgram(globals.cache);
+        this.gfx_program = this.shader_instance.getGfxProgram(globals.renderCache);
 
         // Disable invisible material types.
         if (material_type === Material_Type.Collision_Only || material_type === Material_Type.Occluder)
@@ -887,7 +886,7 @@ export class Cached_Shadow_Map {
     constructor(globals: TheWitnessGlobals, world: Entity_World) {
         const texture_name = `${globals.entity_manager.universe_name}_shadow_map_${this.shadow_map_size}`;
 
-        const clamp_sampler = globals.cache.createSampler({
+        const clamp_sampler = globals.renderCache.createSampler({
             minFilter: GfxTexFilterMode.Bilinear,
             magFilter: GfxTexFilterMode.Bilinear,
             mipFilter: GfxMipFilterMode.Linear,
@@ -980,7 +979,7 @@ export class TheWitnessRenderer implements SceneGfx {
 
         viewerInput.camera.setClipPlanes(0.1);
 
-        this.renderHelper.debugDraw.beginFrame(globals.viewpoint.clipFromViewMatrix, globals.viewpoint.viewFromWorldMatrix, viewerInput.backbufferHeight, viewerInput.backbufferHeight);
+        this.renderHelper.debugDraw.beginFrame(globals.viewpoint.clipFromViewMatrix, globals.viewpoint.viewFromWorldMatrix, viewerInput.backbufferWidth, viewerInput.backbufferHeight);
 
         const renderInstManager = this.renderHelper.renderInstManager;
         const builder = this.renderHelper.renderGraph.newGraphBuilder();
@@ -1035,7 +1034,7 @@ export class TheWitnessRenderer implements SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListMain.reset();
     }
 

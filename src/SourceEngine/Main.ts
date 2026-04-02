@@ -5,10 +5,9 @@ import BitMap from "../BitMap.js";
 import { Camera, CameraController, computeViewSpaceDepthFromWorldSpacePoint } from "../Camera.js";
 import { DataFetcher } from "../DataFetcher.js";
 import { AABB, Frustum, Plane } from "../Geometry.js";
-import { makeStaticDataBuffer } from "../gfx/helpers/BufferHelpers.js";
 import { fullscreenMegaState } from "../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
 import { setBackbufferDescSimple, standardFullClearRenderPassDescriptor } from "../gfx/helpers/RenderGraphHelpers.js";
-import { GfxBindingLayoutDescriptor, GfxBuffer, GfxBufferUsage, GfxClipSpaceNearZ, GfxCullMode, GfxDevice, GfxFormat, GfxInputLayout, GfxInputLayoutBufferDescriptor, GfxMipFilterMode, GfxRenderPass, GfxSampler, GfxSamplerFormatKind, GfxTexFilterMode, GfxTexture, GfxTextureDimension, GfxTextureUsage, GfxVertexAttributeDescriptor, GfxVertexBufferFrequency, GfxWrapMode, GfxProgram, GfxVertexBufferDescriptor, GfxIndexBufferDescriptor } from "../gfx/platform/GfxPlatform.js";
+import { GfxBindingLayoutDescriptor, GfxBuffer, GfxBufferUsage, GfxClipSpaceNearZ, GfxCullMode, GfxDevice, GfxFormat, GfxInputLayout, GfxInputLayoutBufferDescriptor, GfxMipFilterMode, GfxRenderPass, GfxSampler, GfxSamplerFormatKind, GfxTexFilterMode, GfxTexture, GfxTextureDimension, GfxTextureUsage, GfxVertexAttributeDescriptor, GfxVertexBufferFrequency, GfxWrapMode, GfxProgram, GfxVertexBufferDescriptor, GfxIndexBufferDescriptor, GfxBufferFrequencyHint } from "../gfx/platform/GfxPlatform.js";
 import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
 import { GfxRendererLayer, GfxRenderInstList, GfxRenderInstManager, makeSortKey, setSortKeyDepth } from "../gfx/render/GfxRenderInstManager.js";
 import { GfxrAttachmentSlot, GfxrGraphBuilder, GfxrPass, GfxrPassScope, GfxrRenderTargetDescription, GfxrRenderTargetID, GfxrResolveTextureID } from "../gfx/render/GfxRenderGraph.js";
@@ -37,7 +36,9 @@ import { LightmapManager, FaceLightmapUpdater } from "./Materials/Lightmap.js";
 import { BaseMaterial, MaterialShaderTemplateBase, fillSceneParamsOnRenderInst, FogParams, ToneMapParams, LateBindingTexture } from "./Materials/MaterialBase.js";
 import { MaterialCache } from "./Materials/MaterialCache.js";
 import { MaterialProxySystem } from "./Materials/MaterialParameters.js";
-import { ProjectedLight, WorldLightingState } from "./Materials/WorldLight.js";
+import { ProjectedLight } from "./Materials/WorldLight.js";
+import { WorldLightingState } from "../Common/IdTech2/WorldLightingState.js";
+import { createBufferFromData } from "../gfx/helpers/BufferHelpers.js";
 
 export class LooseMount {
     private normalizedFiles: string[];
@@ -283,8 +284,10 @@ export class SkyboxRenderer {
         buildPlaneData(0x205);
         buildPlaneData(0x304);
 
-        this.vertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, vertexData.buffer);
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, indexData.buffer);
+        this.vertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, vertexData.buffer);
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, indexData.buffer);
+        device.setResourceName(this.vertexBuffer, `Skybox ${skyname}`);
+        device.setResourceName(this.indexBuffer, `Skybox ${skyname} (IB)`);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: MaterialShaderTemplateBase.a_Position,   bufferIndex: 0, bufferByteOffset: 0*0x04, format: GfxFormat.F32_RGB, },
@@ -300,10 +303,10 @@ export class SkyboxRenderer {
         this.inputLayout = cache.createInputLayout({ vertexAttributeDescriptors, vertexBufferDescriptors, indexBufferFormat });
 
         this.vertexBufferDescriptors = [
-            { buffer: this.vertexBuffer, byteOffset: 0, },
-            { buffer: renderContext.materialCache.staticResources.zeroVertexBuffer, byteOffset: 0, },
+            { buffer: this.vertexBuffer },
+            { buffer: renderContext.materialCache.staticResources.zeroVertexBuffer },
         ];
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0, };
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
 
         this.bindMaterial(renderContext);
     }
@@ -514,7 +517,7 @@ export class BSPModelRenderer {
     }
 }
 
-export const enum SourceEngineViewType {
+export enum SourceEngineViewType {
     MainView,
     WaterReflectView,
     ShadowMap,
@@ -614,7 +617,7 @@ export class SourceEngineView {
     }
 }
 
-export const enum RenderObjectKind {
+export enum RenderObjectKind {
     WorldSpawn  = 1 << 0,
     Entities    = 1 << 1,
     StaticProps = 1 << 2,
@@ -644,8 +647,11 @@ export class BSPRenderer {
         this.startLightmapPageIndex = renderContext.lightmapManager.appendPackerPages(this.bsp.lightmapPacker);
 
         const device = renderContext.device, cache = renderContext.renderCache;
-        this.vertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, this.bsp.vertexData);
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, this.bsp.indexData);
+        this.vertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, this.bsp.vertexData);
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, this.bsp.indexData);
+
+        device.setResourceName(this.vertexBuffer, `BSP ${this.bsp.mapname}`);
+        device.setResourceName(this.indexBuffer, `BSP ${this.bsp.mapname} (IB)`);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: MaterialShaderTemplateBase.a_Position,   bufferIndex: 0, bufferByteOffset: 0*0x04, format: GfxFormat.F32_RGB, },
@@ -659,8 +665,8 @@ export class BSPRenderer {
         const indexBufferFormat = GfxFormat.U32_R;
         this.inputLayout = cache.createInputLayout({ vertexAttributeDescriptors, vertexBufferDescriptors, indexBufferFormat });
 
-        this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer, byteOffset: 0, }];
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0, };
+        this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer }];
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
 
         for (let i = 0; i < this.bsp.models.length; i++) {
             const model = this.bsp.models[i];
@@ -858,6 +864,7 @@ export class SourceColorCorrection {
             pixelFormat: GfxFormat.U8_RGBA_NORM,
             width, height, depthOrArrayLayers: depth, numLevels: 1, usage: GfxTextureUsage.Sampled,
         });
+        device.setResourceName(this.gfxTexture, `SourceColorCorrection LUT`);
 
         this.gfxSampler = cache.createSampler({
             wrapS: GfxWrapMode.Clamp,
@@ -1286,7 +1293,10 @@ export class SourceWorldViewRenderer {
                 mat4.mul(this.skyboxView.viewFromWorldMatrix, this.skyboxView.viewFromWorldMatrix, skyCamera.modelMatrix);
                 this.skyboxView.finishSetup();
 
-                skyCamera.fillFogParams(this.skyboxView.fogParams);
+                if (renderer.renderContext.enableFog)
+                    skyCamera.fillFogParams(this.skyboxView.fogParams);
+                else
+                    this.skyboxView.fogParams.maxdensity = 0.0;
 
                 // If our skybox is not in a useful spot, then don't render it.
                 if (!this.skyboxView.calcPVS(bspRenderer.bsp, false, parentViewRenderer !== null ? parentViewRenderer.skyboxView : null))
@@ -1354,6 +1364,8 @@ export class SourceWorldViewRenderer {
         mainDepthDesc.clearDepth = standardFullClearRenderPassDescriptor.clearDepth;
 
         const mainColorTargetID = builder.createRenderTargetID(mainColorDesc, `${this.name} - Main Color (sRGB)`);
+
+        builder.pushDebugGroup(this.name);
 
         builder.pushPass((pass) => {
             pass.setDebugName('Skybox');
@@ -1434,6 +1446,8 @@ export class SourceWorldViewRenderer {
         }
         builder.pushDebugThumbnail(mainColorTargetID, `${this.name}\nFinal Output`);
 
+        builder.popDebugGroup();
+
         this.outputColorTargetID = mainColorTargetID;
         this.outputColorTextureID = null;
     }
@@ -1493,8 +1507,8 @@ const bindingLayoutsPost: GfxBindingLayoutDescriptor[] = [
 
 class FullscreenPostProgram extends DeviceProgram {
     public override both = `
-precision mediump float;
-precision lowp sampler3D;
+precision highp float;
+precision highp sampler3D;
 
 uniform sampler2D u_FramebufferColor;
 uniform sampler3D u_ColorCorrectTexture;
@@ -1920,6 +1934,8 @@ export class SourceRenderer implements SceneGfx {
         downsampleColorDesc.setDimensions(mainColorTargetDesc.width >>> 2, mainColorTargetDesc.height >>> 2, 1);
         const downsampleColorTargetID = builder.createRenderTargetID(downsampleColorDesc, 'Bloom Buffer');
 
+        builder.pushDebugGroup('Bloom');
+
         builder.pushPass((pass) => {
             pass.setDebugName('Bloom Downsample');
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, downsampleColorTargetID);
@@ -1973,6 +1989,7 @@ export class SourceRenderer implements SceneGfx {
         });
         builder.pushDebugThumbnail(downsampleColorTargetID);
 
+        builder.popDebugGroup();
         return downsampleColorTargetID;
     }
 
@@ -2054,7 +2071,7 @@ export class SourceRenderer implements SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorGammaTargetID, viewerInput.onscreenTexture);
 
         this.renderHelper.prepareToRender();
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.resetViews();
 
         this.renderContext.debugStatistics.addToConsole(viewerInput);

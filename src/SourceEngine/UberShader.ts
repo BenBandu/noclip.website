@@ -6,9 +6,8 @@
 // and support for a wider variety of variants.
 
 import CodeEditor from "../CodeEditor.js";
-import { GfxDevice, GfxRenderProgramDescriptor } from "../gfx/platform/GfxPlatform.js";
-import { GfxProgram } from "../gfx/platform/GfxPlatformImpl.js";
-import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
+import type { GfxDevice, GfxProgram, GfxRenderProgramDescriptor } from "../gfx/platform/GfxPlatform.js";
+import type { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
 import { preprocessShader_GLSL } from "../gfx/shaderc/GfxShaderCompiler.js";
 import { hashCodeNumberUpdate, HashMap } from "../HashMap.js";
 import { assertExists } from "../util.js";
@@ -154,9 +153,17 @@ export class UberShaderTemplateBasic extends UberShaderTemplate<DefinesMap> {
         return { preprocessedVert, preprocessedFrag };
     }
 
+    private getDebugName(variantSettings: DefinesMap): string {
+        const entriesStr = [...variantSettings.entries()].map(([k, v]) => `${k}=${v}`).join(' ');
+        return `${this.constructor.name} ${entriesStr}`;
+    }
+
     protected override createGfxProgram(cache: GfxRenderCache, variantSettings: DefinesMap): GfxProgram {
         // We do our own caching here; no need to use the render cache for this.
-        return cache.device.createProgram(this.createGfxProgramDescriptor(cache, variantSettings));
+        const gfxProgram = cache.device.createProgram(this.createGfxProgramDescriptor(cache, variantSettings));
+        const debugName = this.getDebugName(variantSettings);
+        cache.device.setResourceName(gfxProgram, debugName);
+        return gfxProgram;
     }
 
     public override destroy(device: GfxDevice): void {
@@ -211,20 +218,23 @@ export class UberShaderInstanceBasic extends UberShaderInstance<DefinesMap> {
     }
 
     public setDefineString(name: string, v: string | null): boolean {
+        if (v !== null) {
+            if (this.variantSettings.get(name) === v)
+                return false;
+        } else {
+            if (!this.variantSettings.has(name))
+                return false;
+        }
+
         if (this.gfxProgram !== null) {
             this.invalidate();
             this.variantSettings = new Map<string, string>(this.variantSettings);
         }
 
-        if (v !== null) {
-            if (this.variantSettings.get(name) === v)
-                return false;
+        if (v !== null)
             this.variantSettings.set(name, v);
-        } else {
-            if (!this.variantSettings.has(name))
-                return false;
+        else
             this.variantSettings.delete(name);
-        }
 
         return true;
     }

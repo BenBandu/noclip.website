@@ -19,7 +19,7 @@ import { dGlobals } from "./Main.js";
 import { dProcName_e } from "./d_procname.js";
 import { dCamera_c } from "./d_camera.js";
 
-export const enum LightType {
+export enum LightType {
     Actor = 0,
     BG0 = 1,
     BG1 = 2,
@@ -190,7 +190,7 @@ export class WAVE_INFO {
     public innerRadius = 0.0;
 }
 
-const enum LightMode {
+enum LightMode {
     BG,
     Actor,
     BGwithPlight,
@@ -226,7 +226,7 @@ export enum DiceWeatherMode {
     Done = 0xFF,
 }
 
-export const enum DiceWeatherState {
+export enum DiceWeatherState {
     Uninitialized = 0,
     Init,
     Execute,
@@ -911,11 +911,11 @@ function dKankyo_DayProc(globals: dGlobals): void {
     // Called once a day.
 }
 
-function dKy_getdaytime_hour(globals: dGlobals): number {
+export function dKy_getdaytime_hour(globals: dGlobals): number {
     return globals.g_env_light.curTime / 15.0;
 }
 
-function dKy_daynight_check(globals: dGlobals): boolean {
+export function dKy_daynight_check(globals: dGlobals): boolean {
     const hour = dKy_getdaytime_hour(globals);
     return hour < 5 || hour > 17;
 }

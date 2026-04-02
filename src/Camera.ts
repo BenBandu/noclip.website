@@ -4,7 +4,7 @@ import InputManager from './InputManager.js';
 import { Frustum, AABB } from './Geometry.js';
 import { clampRange, projectionMatrixForFrustum, calcUnitSphericalCoordinates, projectionMatrixForCuboid, lerpAngle, MathConstants, getMatrixAxisY, transformVec3Mat4w1, Vec3Zero, Vec3UnitY, Vec3UnitX, Vec3UnitZ, transformVec3Mat4w0, getMatrixAxisZ, getMatrixAxisX, calcEulerAngleRotationFromSRTMatrix } from './MathHelpers.js';
 import { projectionMatrixConvertClipSpaceNearZ } from './gfx/helpers/ProjectionHelpers.js';
-import { WebXRContext } from './WebXR.js';
+import { WebXRContext, WebXRInputManager } from './WebXR.js';
 import { assert } from './util.js';
 import { projectionMatrixReverseDepth } from './gfx/helpers/ReversedDepthHelpers.js';
 import { GfxClipSpaceNearZ } from './gfx/platform/GfxPlatform.js';
@@ -180,7 +180,7 @@ export function divideByW(dst: vec4, src: ReadonlyVec4): void {
     dst[3] = 1.0;
 }
 
-export const enum CameraUpdateResult {
+export enum CameraUpdateResult {
     Unchanged,
     Changed,
     ImportantChange,
@@ -470,25 +470,13 @@ export class XRCameraController {
 
     public worldScale: number = 70; // Roughly the size of Banjo in Banjo Kazooie
 
-    public update(webXRContext: WebXRContext): boolean {
+    public update(webXRContext: WebXRContext, xrInputManager: WebXRInputManager): boolean {
         if (!webXRContext.xrSession)
             return false;
 
-        const inputSources = webXRContext.xrSession.inputSources;
-
         const cameraMoveSpeed = this.worldScale;
-        const keyMovement = scratchVec3a;
-        vec3.zero(keyMovement);
-        if (inputSources.length > 0) {
-            for (let i = 0; i < inputSources.length; i++) {
-                const gamepad = inputSources[i].gamepad;
-                if (gamepad && gamepad.axes.length >= 4 && gamepad.buttons.length >= 2) {
-                    keyMovement[0] = gamepad.axes[2] * cameraMoveSpeed;
-                    keyMovement[1] = (gamepad.buttons[0].value - gamepad.buttons[1].value) * cameraMoveSpeed;
-                    keyMovement[2] = gamepad.axes[3] * cameraMoveSpeed;
-                }
-            }
-        }
+        const keyMovement = xrInputManager.getTranslationDelta();
+        vec3.scale(keyMovement, keyMovement, cameraMoveSpeed);
 
         let updated = false;
         if (!vec3.exactEquals(keyMovement, Vec3Zero)) {            
@@ -817,7 +805,7 @@ export class OrthoCameraController implements CameraController {
             zTargetAdjAmt -= 80.0;
         if (inputManager.isKeyDown('KeyE'))
             zTargetAdjAmt += 80.0;
-        this.zTarget += zTargetAdjAmt * this.sceneMoveSpeedMult;
+        this.zTarget += zTargetAdjAmt;
         if (this.zTarget > -10)
             this.zTarget = -10;
         let zTargetDelta = this.zTarget - this.z;
@@ -866,10 +854,10 @@ export class OrthoCameraController implements CameraController {
             this.z += zTargetDelta * kSpringZ;
 
             getMatrixAxisX(scratchVec3a, this.camera.worldMatrix);
-            vec3.scaleAndAdd(this.translation, this.translation, scratchVec3a, this.txVel * this.z);
+            vec3.scaleAndAdd(this.translation, this.translation, scratchVec3a, this.txVel * this.z * this.sceneMoveSpeedMult);
 
             getMatrixAxisY(scratchVec3a, this.camera.worldMatrix);
-            vec3.scaleAndAdd(this.translation, this.translation, scratchVec3a, this.tyVel * this.z);
+            vec3.scaleAndAdd(this.translation, this.translation, scratchVec3a, this.tyVel * this.z * this.sceneMoveSpeedMult);
 
             this.forceUpdate = false;
         }
@@ -880,7 +868,7 @@ export class OrthoCameraController implements CameraController {
         vec3.scale(eyePos, eyePos, -this.farPlane / 2);
         vec3.add(eyePos, eyePos, this.translation);
         mat4.targetTo(this.camera.worldMatrix, eyePos, this.translation, Vec3UnitY);
-        this.camera.setOrthographic(-this.z * 10, this.camera.aspect, this.nearPlane, this.farPlane);
+        this.camera.setOrthographic(-this.z * 10 * this.sceneMoveSpeedMult, this.camera.aspect, this.nearPlane, this.farPlane);
         this.camera.worldMatrixUpdated();
 
         return updated ? CameraUpdateResult.Changed : CameraUpdateResult.Unchanged;

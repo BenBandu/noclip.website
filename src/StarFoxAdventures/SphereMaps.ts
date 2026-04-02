@@ -7,10 +7,9 @@ import { GfxrAttachmentSlot, GfxrGraphBuilder, GfxrPass, GfxrPassScope, GfxrRend
 import { GfxRenderInstList, GfxRenderInstManager } from '../gfx/render/GfxRenderInstManager.js';
 import * as GX from '../gx/gx_enum.js';
 import * as GX_Material from '../gx/gx_material.js';
-import { ColorKind, DrawParams, fillSceneParamsData, gxBindingLayouts, GXRenderHelperGfx, MaterialParams, SceneParams, ub_SceneParamsBufferSize } from '../gx/gx_render.js';
+import { ColorKind, DrawParams, fillSceneParamsData, gxBindingLayouts, GXRenderHelperGfx, GXTextureMapping, MaterialParams, SceneParams, ub_SceneParamsBufferSize } from '../gx/gx_render.js';
 import { projectionMatrixForCuboid, setMatrixTranslation, Vec3Zero } from '../MathHelpers.js';
 import { TSDraw } from "../SuperMarioGalaxy/DDraw.js";
-import { TextureMapping } from '../TextureHolder.js';
 import { nArray } from '../util.js';
 import { SFAMaterialBuilder } from './MaterialBuilder.js';
 import { makeMaterialTexture, MaterialFactory } from './materials.js';
@@ -35,7 +34,7 @@ const REFLECTIVE_PROBE_FACTORS = [
     [0.4, 0.5],
 ]
 
-const enum SphereMapType {
+enum SphereMapType {
     // Sky light and ground light emitted against a sphere
     HemisphericProbe,
     // Encoded texture containing Red: sky light, Green: surroundings, Blue: ground light
@@ -86,7 +85,7 @@ function createReflectiveProbeMaterial(materialFactory: MaterialFactory, texFetc
         setMatrixTranslation(dst, [0.5, 0.5, 0.0]);
     });
     const texCoord = mb.genTexCoord(GX.TexGenType.MTX2x4, GX.TexGenSrc.NRM, GX.TexGenMatrix.TEXMTX0);
-    const texMap = mb.genTexMap(makeMaterialTexture(texFetcher.getTexture(materialFactory.cache, 0x5dc, false)));
+    const texMap = mb.genTexMap(makeMaterialTexture(texFetcher.getTexture(materialFactory.renderCache, 0x5dc, false)));
     mb.setTevOrder(stage0, texCoord, texMap, GX.RasColorChannelID.COLOR0A0);
     mb.setTevColorFormula(stage0, GX.CC.ZERO, GX.CC.RASC, GX.CC.RASA, GX.CC.TEXC);
     mb.setTevAlphaFormula(stage0, GX.CA.ZERO, GX.CA.ZERO, GX.CA.ZERO, GX.CA.ZERO);
@@ -114,7 +113,7 @@ function createReflectiveProbeMaterial(materialFactory: MaterialFactory, texFetc
 }
 
 interface RenderedSphereMap {
-    textureMapping: TextureMapping;
+    textureMapping: GXTextureMapping;
     targetID: GfxrRenderTargetID;
     resolveID: GfxrResolveTextureID;
 }
@@ -122,14 +121,14 @@ interface RenderedSphereMap {
 export class SphereMapManager {
     private targetDesc = new GfxrRenderTargetDescription(GfxFormat.U8_RGBA_RT);
     private params: SphereMapParams[] = nArray(6, () => { return { type: SphereMapType.HemisphericProbe, attenFactors: [0, 0], matColorFactors: [0, 0] }; });
-    private ddraw = new TSDraw();
+    private ddraw = new TSDraw('SphereMaps');
     private hemisphericMaterial: SFAMaterialBuilder<World>;
     private reflectiveMaterial: SFAMaterialBuilder;
     
     private sphereMapSampler?: GfxSampler;
     private sphereMaps: RenderedSphereMap[] = nArray<RenderedSphereMap>(6, () => {
         return {
-            textureMapping: new TextureMapping(),
+            textureMapping: new GXTextureMapping(),
             targetID: 0 as GfxrRenderTargetID,
             resolveID: 0 as GfxrResolveTextureID,
         };

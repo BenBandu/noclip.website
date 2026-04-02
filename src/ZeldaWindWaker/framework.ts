@@ -42,7 +42,7 @@ export class fGlobals {
 }
 
 //#region cPhs
-export const enum cPhs__Status {
+export enum cPhs__Status {
     Started,
     Loading,
     Next,
@@ -223,6 +223,30 @@ export function fpcSCtRq_Request<G>(globals: fGlobals, ly: layer_class | null, p
     return pcId;
 }
 
+export function fpcFCtRq_Request<G>(globals: fGlobals, globalUserData: GlobalUserData, ly: layer_class | null, pcName: number, userData: G): base_process_class | null {
+    const constructor = fpcPf_Get__Constructor(globals, pcName);
+    if (constructor === null)
+        return null;
+
+    if (ly === null)
+        ly = fpcLy_CurrentLayer(globals);
+    
+    const binary = fpcPf_Get__ProfileBinary(globals, pcName);
+    const pcId = fpcBs_MakeOfId(globals);
+    const process = new constructor(globals, pcName, pcId, binary.createDataView());
+    if (process) {
+        fpcLy_SetCurrentLayer(globals, ly);
+        const status = process.load(globalUserData, userData);
+        assert( status === cPhs__Status.Next, "Process failed to load" );
+        
+        // The game pushes this to the Ct queue so that a user supplied callback can be called()
+        // This is only ever used by one actor, daIball_c, which we don't currently implement.
+        fpcEx_ToExecuteQ(globals, process);
+        return process;
+    }
+    return null;
+}
+
 //#endregion
 
 //#region fpcLy (framework process layer)
@@ -256,7 +280,7 @@ export function fpcLy_SetCurrentLayer(globals: fGlobals, layer: layer_class): vo
     globals.lyCurr = layer;
 }
 
-export function fpcLyIt_AllJudge(globals: fGlobals, judgeFunc: (pc: base_process_class, userData: any) => boolean, userData: any): base_process_class | null {
+export function fpcLyIt_AllJudge<T>(globals: fGlobals, judgeFunc: (pc: base_process_class, userData: T) => boolean, userData: T): base_process_class | null {
     for (let i = 0; i < globals.lnQueue.length; i++) {
         const pc = globals.lnQueue[i];
         if (judgeFunc(pc, userData)) {
@@ -294,7 +318,7 @@ function fpcEx_ToExecuteQ(globals: fGlobals, process: base_process_class): void 
     globals.lnQueue.push(process);
 }
 
-export function fpcEx_Search(globals: fGlobals, judgeFunc: (pc: base_process_class, userData: any) => boolean, userData: any): base_process_class | null {
+export function fpcEx_Search<T>(globals: fGlobals, judgeFunc: (pc: base_process_class, userData: T) => boolean, userData: T): base_process_class | null {
     return fpcLyIt_AllJudge(globals, judgeFunc, userData);
 }
 

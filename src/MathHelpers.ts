@@ -4,7 +4,7 @@ import { mat4, vec3, quat, ReadonlyVec3, ReadonlyMat4 } from "gl-matrix";
 // Misc bits of 3D math.
 
 // Basic scalar constants.
-export const enum MathConstants {
+export enum MathConstants {
     DEG_TO_RAD = 0.017453292519943295, // Math.PI / 180,
     RAD_TO_DEG = 57.29577951308232, // 180 / Math.PI,
     TAU = 6.283185307179586, // Math.PI * 2
@@ -551,7 +551,7 @@ export function vec3FromBasis3(dst: vec3, pt: ReadonlyVec3, b0: ReadonlyVec3, s0
     dst[2] = pt[2] + b0[2] * s0 + b1[2] * s1 + b2[2] * s2;
 }
 
-export const enum CalcBillboardFlags {
+export enum CalcBillboardFlags {
     // The up vector for computing roll should come from the input matrix.
     UseRollLocal = 0 << 0,
     // The up vector for computing roll should be global world up 0, 1, 0.
@@ -576,18 +576,18 @@ export function calcBillboardMatrix(dst: mat4, m: ReadonlyMat4, flags: CalcBillb
 
     // General calculation:
     //
-    //   GlobalX = { 1, 0, 0 }, GlobalY = { 0, 1, 0 }, GlobalZ = { 0, 0, 1 }
+    //   UnitX = { 1, 0, 0 }, UnitY = { 0, 1, 0 }, UnitZ = { 0, 0, 1 }
     //   MatrixX = { m[0], m[1], m[2] }
     //   MatrixY = axisY || { m[4], m[5], m[6] }
     //   MatrixZ = { m[8], m[9], m[10] }
     //
     // Pick InputZ:
-    //   UseZPlane: GlobalZ
+    //   UseZPlane: UnitZ
     //   UseZSphere: { -m[12], -m[13], -m[14] }
     //
     // Pick InputYRoll:
     //   UseRollLocal: MatrixY
-    //   UseRollGlobal: GlobalY
+    //   UseRollGlobal: UnitY
     //
     // Calculate:
     //   Z = InputZ
@@ -724,16 +724,22 @@ export function calcBillboardMatrix(dst: mat4, m: ReadonlyMat4, flags: CalcBillb
     dst[13] = m[13];
     dst[14] = m[14];
 
-    // Fill with junk to try and signal when something has gone horribly wrong. This should go unused,
-    // since this is supposed to generate a mat4x3 matrix.
-    dst[3] = 9999.0;
-    dst[7] = 9999.0;
-    dst[11] = 9999.0;
-    dst[15] = 9999.0;
+    dst[3] = 0.0;
+    dst[7] = 0.0;
+    dst[11] = 0.0;
+    dst[15] = 1.0;
 }
 
-export function randomRange(a: number, b = -a): number {
+export function randomRangeFloat(a: number, b = -a): number {
     return lerp(a, b, Math.random());
+}
+
+export function randomRangeInt(min: number, max: number): number {
+    return randomRangeFloat(min, max) | 0;
+}
+
+export function randomRangeVec3(dst: vec3, range: number): void {
+    vec3.set(dst, randomRangeFloat(range), randomRangeFloat(range), randomRangeFloat(range));
 }
 
 /**

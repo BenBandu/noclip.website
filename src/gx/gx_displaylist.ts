@@ -50,7 +50,7 @@ export interface GX_VtxAttrFmt {
 }
 
 // GX_SetVtxDesc
-export const enum GX_VtxDescOutputMode {
+export enum GX_VtxDescOutputMode {
     VertexData,
     Index,
     None,
@@ -70,7 +70,7 @@ export interface GX_Array {
 
 // Similar to GX.Attr, but is for what the shader will use as inputs, rather than
 // the raw GX attributes.
-export const enum VertexAttributeInput {
+export enum VertexAttributeInput {
     // TEXnMTXIDX are packed specially because of GL limitations.
     TEX0123MTXIDX,
     TEX4567MTXIDX,
@@ -155,6 +155,7 @@ export interface LoadedVertexData {
     totalVertexCount: number;
     vertexId: number;
     draws: LoadedVertexDraw[];
+    endOffs: number | null;
 
     // Internal. Used for re-running vertices.
     dlView: DataView | null;
@@ -412,7 +413,7 @@ function translateSourceVatLayout(vatFormat: GX_VtxAttrFmt[], vcd: GX_VtxDesc[])
         // Describes format of pointed-to data.
         const vtxAttrFmt = vatFormat[vtxAttrib];
 
-        if (!vtxAttrDesc || vtxAttrDesc.type === GX.AttrType.NONE)
+        if (!vtxAttrDesc || vtxAttrDesc.type === GX.AttrType.NONE || vtxAttrDesc.type === GX.AttrType.ZERO)
             continue;
 
         const srcIndexComponentCount = getIndexNumComponents(vtxAttrib, vtxAttrFmt);
@@ -752,6 +753,20 @@ function generateRunVertices(loadedVertexLayout: LoadedVertexLayout, vatLayout: 
             }
         }
 
+        function compileZero(): string {
+            let S = ``;
+
+            const dstComponentSize = getFormatCompByteSize(dstFormat);
+            const dstComponentCount = getFormatComponentCount(dstFormat);
+            for (let i = 0; i < dstComponentCount; i++) {
+                const dstOffs = dstBaseOffs + (i * dstComponentSize);
+                S += `
+    ${compileWriteOneComponent(dstOffs, '0.0')};`
+            }
+
+            return S;
+        }
+
         function compileOneIndex(viewName: string, readIndex: string, drawCallIdxIncr: number, uniqueSuffix: string = ''): string {
             if (outputMode === GX_VtxDescOutputMode.VertexData) {
                 const stride = `vtxArrayStrides[${vtxAttrib}]`;
@@ -790,17 +805,20 @@ function generateRunVertices(loadedVertexLayout: LoadedVertexLayout, vatLayout: 
             }
         }
 
-        switch (vtxAttrDesc.type) {
-        case GX.AttrType.DIRECT:
+        if (vtxAttrDesc.type === GX.AttrType.DIRECT) {
             return `
     // ${getAttrName(vtxAttrib)}
     ${compileOneAttrib(`dlView`, `drawCallIdx`)}
     drawCallIdx += ${srcAttrByteSize};`;
-        case GX.AttrType.INDEX8:
+        } else if (vtxAttrDesc.type === GX.AttrType.INDEX8) {
             return compileAttribIndex(compileVtxArrayViewName(vtxAttrib), `dlView.getUint8(drawCallIdx)`, 1);
-        case GX.AttrType.INDEX16:
+        } else if (vtxAttrDesc.type === GX.AttrType.INDEX16) {
             return compileAttribIndex(compileVtxArrayViewName(vtxAttrib), `dlView.getUint16(drawCallIdx)`, 2);
-        default:
+        } else if (vtxAttrDesc.type === GX.AttrType.ZERO) {
+            return `
+    // ${getAttrName(vtxAttrib)} - ZERO
+    ${compileZero()}`;
+        } else {
             throw "whoops";
         }
     }
@@ -824,7 +842,7 @@ return function() {
 
     const generator = new Function(fullSource);
     const func = generator() as T;
-    return func; 
+    return func;
 }
 
 function compileSingleVtxLoader(loadedVertexLayout: LoadedVertexLayout, srcLayout: SourceVatLayout): SingleVtxLoaderFunc {
@@ -1096,7 +1114,7 @@ class VtxLoaderImpl implements VtxLoader {
         const vertexBuffers: ArrayBuffer[] = [dstVertexData];
 
         const indexData = dstIndexData.buffer;
-        return { indexData, totalIndexCount, totalVertexCount, draws, vertexId: baseVertex, vertexBuffers, dlView, drawCalls };
+        return { indexData, totalIndexCount, totalVertexCount, draws, vertexId: baseVertex, vertexBuffers, dlView, drawCalls, endOffs: drawCallIdx };
     }
 
     public loadVertexDataInto(dst: DataView, dstOffs: number, loadedVertexData: LoadedVertexData, vtxArrays: GX_Array[]): void {
@@ -1265,14 +1283,22 @@ export class DisplayListRegisters {
 
     // TEV colors are weird and are two things under the hood
     // with the same register address.
-    public kc: Uint32Array = new Uint32Array(4 * 2 * 2);
+    public tevKColor: Uint32Array = new Uint32Array(4 * 2 * 2);
 
     constructor() {
         // Initialize defaults.
         this.bp[GX.BPRegister.SS_MASK] = 0x00FFFFFF;
     }
 
-    public bps(regBag: number): void {
+    public bpRegIsSet(regAddr: number): boolean {
+        return !!(this.bp[regAddr] & (1 << 31));
+    }
+
+    public bpGet(regAddr: number): number {
+        return this.bp[regAddr];
+    }
+
+    public bpSet(regBag: number): void {
         // First byte has register address, other 3 have value.
         const regAddr  = regBag >>> 24;
 
@@ -1280,26 +1306,26 @@ export class DisplayListRegisters {
         // Retrieve existing value, overwrite w/ mask.
         const regValue = (this.bp[regAddr] & ~regWMask) | (regBag & regWMask);
         // The mask resets after use.
-        if (regAddr !== GX.BPRegister.SS_MASK) 
+        if (regAddr !== GX.BPRegister.SS_MASK)
             this.bp[GX.BPRegister.SS_MASK] = 0x00FFFFFF;
         // Set new value.
-        this.bp[regAddr] = regValue;
+        this.bp[regAddr] = (1 << 31) | regValue;
 
         // Copy TEV colors internally.
         if (regAddr >= GX.BPRegister.TEV_REGISTERL_0_ID && regAddr <= GX.BPRegister.TEV_REGISTERL_0_ID + 4 * 2) {
             const kci = regAddr - GX.BPRegister.TEV_REGISTERL_0_ID;
             const bank = (regValue >>> 23) & 0x01;
-            this.kc[bank * 4 * 2 + kci] = regValue;
+            this.tevKColor[bank * 4 * 2 + kci] = regValue;
         }
     }
 
-    public xfs(idx: GX.XFRegister, sub: number, v: number): void {
+    public xfSet(idx: GX.XFRegister, sub: number, v: number): void {
         assert(idx >= 0x1000);
         idx -= 0x1000;
         this.xf[idx * 0x10 + sub] = v;
     }
 
-    public xfg(idx: GX.XFRegister, sub: number = 0): number {
+    public xfGet(idx: GX.XFRegister, sub: number = 0): number {
         assert(idx >= 0x1000);
         idx -= 0x1000;
         return this.xf[idx * 0x10 + sub];
@@ -1315,7 +1341,7 @@ export function displayListToString(buffer: ArrayBufferSlice) {
         return `0x${n.toString(16)}`;
     }
 
-    const enum RegisterBlock { XF, BP, CP };
+    enum RegisterBlock { XF, BP, CP };
     const blockTables = [GX.XFRegister, GX.BPRegister, GX.CPRegister];
     const blockNames = ['XF', 'BP', 'CP'];
 
@@ -1337,12 +1363,12 @@ export function displayListToString(buffer: ArrayBufferSlice) {
         case GX.Command.LOAD_BP_REG: {
             const regBag = view.getUint32(i);
             i += 4;
-            
+
             const regAddr  = regBag >>> 24 as GX.BPRegister;
             const regValue = regBag & ssMask;
             if (regAddr !== GX.BPRegister.SS_MASK) { ssMask = 0x00FFFFFF; }
             else { ssMask = regValue; }
-            
+
             dlString += toDlString(RegisterBlock.BP, regAddr, regValue);
             break;
         }
@@ -1394,7 +1420,7 @@ export function displayListRegistersRun(r: DisplayListRegisters, buffer: ArrayBu
         case GX.Command.LOAD_BP_REG: {
             const regBag = view.getUint32(i);
             i += 4;
-            r.bps(regBag);
+            r.bpSet(regBag);
             break;
         }
 
@@ -1416,13 +1442,13 @@ export function displayListRegistersRun(r: DisplayListRegisters, buffer: ArrayBu
             i += 2;
 
             for (let j = 0; j < len; j++) {
-                r.xfs(regAddr, j, view.getUint32(i));
+                r.xfSet(regAddr, j, view.getUint32(i));
                 i += 4;
             }
 
             // Clear out the other values.
             for (let j = len; j < 16; j++) {
-                r.xfs(regAddr, j, 0);
+                r.xfSet(regAddr, j, 0);
             }
 
             break;
@@ -1442,8 +1468,8 @@ function setBPReg(addr: number, value: number): number {
 export function displayListRegistersInitGX(r: DisplayListRegisters): void {
     // Init swap tables.
     for (let i = 0; i < 8; i += 2) {
-        r.bps(setBPReg(GX.BPRegister.TEV_KSEL_0_ID + i + 0, 0b0100));
-        r.bps(setBPReg(GX.BPRegister.TEV_KSEL_0_ID + i + 1, 0b1110));
+        r.bpSet(setBPReg(GX.BPRegister.TEV_KSEL_0_ID + i + 0, 0b0100));
+        r.bpSet(setBPReg(GX.BPRegister.TEV_KSEL_0_ID + i + 1, 0b1110));
     }
 }
 //#endregion
@@ -1510,6 +1536,7 @@ export function coalesceLoadedDatas(loadedDatas: LoadedVertexData[]): LoadedVert
         totalIndexCount,
         totalVertexCount,
         vertexId: 0,
+        endOffs: null,
         draws,
         drawCalls: null,
         dlView: null,

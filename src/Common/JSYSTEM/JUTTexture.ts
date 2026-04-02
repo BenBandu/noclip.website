@@ -3,11 +3,10 @@ import ArrayBufferSlice from "../../ArrayBufferSlice.js";
 import * as GX from '../../gx/gx_enum.js';
 import { assert } from "../../util.js";
 import { GfxSampler, GfxTexture, GfxDevice } from "../../gfx/platform/GfxPlatform.js";
-import { Texture } from "../../viewer.js";
-import { TextureMapping } from "../../TextureHolder.js";
 import { GfxRenderCache } from "../../gfx/render/GfxRenderCache.js";
-import { translateTexFilterGfx, translateWrapModeGfx, loadTextureFromMipChain, translateMaxAnisotropy } from "../../gx/gx_render.js";
+import { translateTexFilterGfx, translateWrapModeGfx, loadTextureFromMipChain, translateMaxAnisotropy, GXTextureMapping } from "../../gx/gx_render.js";
 import { calcMipChain, TextureInputGX } from "../../gx/gx_texture.js";
+import * as Viewer from "../../viewer.js";
 
 export interface BTI_Texture extends TextureInputGX {
     wrapS: GX.WrapMode;
@@ -76,6 +75,7 @@ export interface TEX1_SamplerSub {
 }
 
 export function translateSampler(device: GfxDevice, cache: GfxRenderCache, sampler: TEX1_SamplerSub): GfxSampler {
+    const isNoMip = sampler.minFilter === GX.TexFilter.LINEAR || sampler.minFilter === GX.TexFilter.NEAR;
     const [minFilter, mipFilter] = translateTexFilterGfx(sampler.minFilter);
     const [magFilter]            = translateTexFilterGfx(sampler.magFilter);
 
@@ -84,7 +84,7 @@ export function translateSampler(device: GfxDevice, cache: GfxRenderCache, sampl
         wrapT: translateWrapModeGfx(sampler.wrapT),
         minFilter, mipFilter, magFilter,
         minLOD: sampler.minLOD,
-        maxLOD: sampler.maxLOD,
+        maxLOD: isNoMip ? 0 : sampler.maxLOD,
         maxAnisotropy: translateMaxAnisotropy(sampler.maxAnisotropy),
     });
 
@@ -94,7 +94,7 @@ export function translateSampler(device: GfxDevice, cache: GfxRenderCache, sampl
 export class BTIData {
     private gfxSampler: GfxSampler;
     private gfxTexture: GfxTexture;
-    public viewerTexture: Texture;
+    public viewerTexture: Viewer.Texture;
 
     constructor(device: GfxDevice, cache: GfxRenderCache, public btiTexture: BTI_Texture) {
         this.gfxSampler = translateSampler(device, cache, btiTexture);
@@ -104,8 +104,8 @@ export class BTIData {
         this.viewerTexture = viewerTexture;
     }
 
-    public fillTextureMapping(m: TextureMapping): void {
-        m.lateBinding = null;
+    public fillTextureMapping(m: GXTextureMapping): void {
+        m.lateBinding = undefined;
         m.gfxTexture = this.gfxTexture;
         m.gfxSampler = this.gfxSampler;
         m.lodBias = this.btiTexture.lodBias;

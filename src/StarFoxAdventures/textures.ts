@@ -1,7 +1,9 @@
+
 import { hexzero } from '../util.js';
 import ArrayBufferSlice from '../ArrayBufferSlice.js';
 import * as GX_Texture from '../gx/gx_texture.js';
-import { loadTextureFromMipChain, translateWrapModeGfx, translateTexFilterGfx } from '../gx/gx_render.js';
+import * as GX from '../gx/gx_enum.js';
+import { loadTextureFromMipChain, translateWrapModeGfx, translateTexFilterGfx, GXTextureMapping } from '../gx/gx_render.js';
 import { GfxDevice, GfxMipFilterMode, GfxTexture, GfxSampler, GfxFormat, makeTextureDescriptor2D, GfxWrapMode, GfxTexFilterMode } from '../gfx/platform/GfxPlatform.js';
 import { DataFetcher } from '../DataFetcher.js';
 import * as UI from '../ui.js';
@@ -9,9 +11,8 @@ import * as UI from '../ui.js';
 import { GameInfo } from './scenes.js';
 import { loadRes } from './resource.js';
 import { readUint32 } from './util.js';
-import * as Viewer from '../viewer.js';
-import { TextureMapping } from '../TextureHolder.js';
 import { GfxRenderCache } from '../gfx/render/GfxRenderCache.js';
+import * as Viewer from '../viewer.js';
 
 export class SFATexture {
     public viewerTexture?: Viewer.Texture;
@@ -39,7 +40,7 @@ export class SFATexture {
         device.destroyTexture(this.gfxTexture);
     }
 
-    public setOnTextureMapping(mapping: TextureMapping) {
+    public setOnTextureMapping(mapping: GXTextureMapping) {
         mapping.reset();
         mapping.gfxTexture = this.gfxTexture;
         mapping.gfxSampler = this.gfxSampler;
@@ -95,6 +96,7 @@ function loadTexture(cache: GfxRenderCache, texData: ArrayBufferSlice, isBeta: b
     const loadedTexture = loadTextureFromMipChain(cache.device, mipChain);
     
     // GL texture is bound by loadTextureFromMipChain.
+    const isNoMip = fields.minFilt === GX.TexFilter.LINEAR || fields.minFilt === GX.TexFilter.NEAR;
     const [minFilter, mipFilter] = translateTexFilterGfx(fields.minFilt);
     const gfxSampler = cache.createSampler({
         wrapS: translateWrapModeGfx(fields.wrapS),
@@ -103,7 +105,7 @@ function loadTexture(cache: GfxRenderCache, texData: ArrayBufferSlice, isBeta: b
         magFilter: translateTexFilterGfx(fields.magFilt)[0],
         mipFilter: mipFilter,
         minLOD: 0,
-        maxLOD: 100,
+        maxLOD: isNoMip ? 0 : 100,
     });
 
     const texture = new SFATexture(
@@ -248,11 +250,13 @@ class TextureFile {
                 const texture = loadTextureArrayFromTable(cache, this.tab, this.bin, num, this.isBeta);
                 if (texture !== null) {
                     for (let arrayIdx = 0; arrayIdx < texture.textures.length; arrayIdx++) {
-                        const viewerTexture = texture.textures[arrayIdx].viewerTexture;
-                        if (viewerTexture !== undefined)
-                            viewerTexture.name = `${this.name} #${num}`;
+                        const gfxTexture = texture.textures[arrayIdx].gfxTexture;
+                        if (gfxTexture !== null) {
+                            let name = `${this.name} #${num}`;
                             if (texture.textures.length > 1)
-                                viewerTexture!.name += `.${arrayIdx}`;
+                                name += `.${arrayIdx}`;
+                            cache.device.setResourceName(gfxTexture, name);
+                        }
                     }
                 }
                 this.textures[num] = texture;
@@ -320,15 +324,25 @@ class SubdirTextureFiles {
     }
 }
 
+class TextureListHolder implements UI.TextureListHolder {
+    public viewerTextures: Viewer.Texture[] = [];
+    public onnewtextures: (() => void) = (() => {});
+
+    public get textureNames(): string[] {
+        return this.viewerTextures.map((texture) => texture.gfxTexture.ResourceName!);
+    }
+
+    public async getViewerTexture(i: number) {
+        return this.viewerTextures[i];
+    }
+}
+
 export class SFATextureFetcher extends TextureFetcher {
     private textableBin: DataView;
     private texpre: TextureFile | null;
     private subdirTextureFiles: {[subdir: string]: SubdirTextureFiles} = {};
     private fakes: FakeTextureFetcher = new FakeTextureFetcher();
-    public textureHolder: UI.TextureListHolder = {
-        viewerTextures: [],
-        onnewtextures: null,
-    };
+    public textureHolder = new TextureListHolder();
 
     private constructor(private gameInfo: GameInfo, private isBeta: boolean) {
         super();

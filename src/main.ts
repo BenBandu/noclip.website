@@ -1,8 +1,9 @@
 
 /* @preserve The source code to this website is under the MIT license and can be found at https://github.com/magcius/noclip.website */
 
-import { Viewer, SceneGfx, InitErrorCode, initializeViewer, makeErrorUI, resizeCanvas, ViewerUpdateInfo } from './viewer.js';
+import { Viewer, SceneGfx, InitErrorCode, makeErrorUI, resizeCanvas, ViewerUpdateInfo, initializeViewerWebGL2, initializeViewerWebGPU } from './viewer.js';
 
+import * as Scenes_Example from './Example/Scenes.js';
 import * as Scenes_BanjoKazooie from './BanjoKazooie/scenes.js';
 import * as Scenes_ZeldaTwilightPrincess from './ZeldaTwilightPrincess/Main.js';
 import * as Scenes_MarioKartDoubleDash from './j3d/mkdd_scenes.js';
@@ -88,6 +89,9 @@ import * as Scenes_Halo1 from './Halo1/scenes.js';
 import * as Scenes_WorldOfWarcraft from './WorldOfWarcraft/scenes.js';
 import * as Scenes_Glover from './Glover/scenes.js';
 import * as Scenes_HalfLife from './GoldSrc/Scenes_HalfLife.js';
+import * as Scenes_CounterStrike from './GoldSrc/Scenes_CounterStrike.js';
+import * as Scenes_TeamFortressClassic from './GoldSrc/Scenes_TeamFortressClassic.js';
+import * as Scenes_Quake from './Quake/Scenes_Quake.js';
 import * as Scenes_SuperMonkeyBall from './SuperMonkeyBall/Scenes_SuperMonkeyBall.js';
 import * as Scenes_DragonQuest8 from './DragonQuest8/scenes.js';
 import * as Scenes_Morrowind from './Morrowind/Scenes.js';
@@ -96,6 +100,15 @@ import * as Scenes_AShortHike from './AShortHike/Scenes.js';
 import * as Scenes_NeonWhite from './NeonWhite/Scenes.js';
 import * as Scenes_OuterWilds from './OuterWilds/Scenes.js';
 import * as Scenes_CrashWarped from './CrashWarped/scenes.js';
+import * as Scenes_PlusForXP from './PlusForXP/scenes.js';
+import * as Scenes_MarioKart64 from './MarioKart64/scenes.js';
+import * as Scenes_KirbyAirRide from './KirbyAirRide/scenes.js';
+import * as Scenes_Descent1 from './Descent1_2/Scenes_Descent1.js';
+import * as Scenes_Descent2 from './Descent1_2/Scenes_Descent2.js';
+import * as Scenes_Descent2Vertigo from './Descent1_2/Scenes_Descent2Vertigo.js';
+import * as Scenes_Spyro from './Spyro/scenes.js';
+import * as Scenes_CrazyTaxi from './CrazyTaxi/scenes.js';
+import * as Scenes_TokyoMirageSessionsSharpFE from './TokyoMirageSessionsSharpFE/scenes.js';
 import * as Scenes_Dreamfall from './Dreamfall/Scenes.js';
 
 import { DroppedFileSceneDesc, traverseFileSystemDataTransfer } from './Scenes_FileDrops.js';
@@ -120,8 +133,12 @@ import InputManager from './InputManager.js';
 import { WebXRContext } from './WebXR.js';
 import { debugJunk } from './DebugJunk.js';
 import { IS_DEVELOPMENT } from './BuildVersion.js';
+import { GfxPlatform } from './gfx/platform/GfxPlatform.js';
 
 const sceneGroups: (string | SceneGroup)[] = [
+    "Development",
+    Scenes_Example.sceneGroup,
+
     "Wii",
     Scenes_MarioKartWii.sceneGroup,
     Scenes_KirbysReturnToDreamLand.sceneGroup,
@@ -135,6 +152,7 @@ const sceneGroups: (string | SceneGroup)[] = [
     Scenes_WiiSports.sceneGroup,
     Scenes_WiiSportsResort.sceneGroup,
     "GameCube",
+    Scenes_KirbyAirRide.sceneGroup,
     Scenes_LuigisMansion.sceneGroup,
     Scenes_MarioKartDoubleDash.sceneGroup,
     Scenes_MetroidPrime.sceneGroupMP1,
@@ -163,6 +181,7 @@ const sceneGroups: (string | SceneGroup)[] = [
     Scenes_BeetleAdventureRacing.sceneGroup,
     Scenes_DiddyKongRacing.sceneGroup,
     Scenes_Glover.sceneGroup,
+    Scenes_MarioKart64.sceneGroup,
     Scenes_PaperMario64.sceneGroup,
     Scenes_Pilotwings64.sceneGroup,
     Scenes_PokemonSnap.sceneGroup,
@@ -190,8 +209,15 @@ const sceneGroups: (string | SceneGroup)[] = [
     Scenes_Portal.sceneGroup,
     Scenes_Portal2.sceneGroup,
     Scenes_WorldOfWarcraft.vanillaSceneGroup,
+    Scenes_WorldOfWarcraft.bcSceneGroup,
+    Scenes_WorldOfWarcraft.wotlkSceneGroup,
     "Experimental",
     Scenes_CrashWarped.sceneGroup,
+    Scenes_CrazyTaxi.sceneGroup,
+    Scenes_Spyro.sceneGroup,
+    Scenes_Spyro.sceneGroup2,
+    Scenes_Spyro.sceneGroup3,
+    Scenes_PlusForXP.sceneGroup,
     Scenes_DonkeyKong64.sceneGroup,
     Scenes_DonkeyKongCountryReturns.sceneGroup,
     Scenes_Elebits.sceneGroup,
@@ -220,9 +246,10 @@ const sceneGroups: (string | SceneGroup)[] = [
     Scenes_TheStanleyParable.sceneGroup,
     Scenes_Infra.sceneGroup,
     Scenes_JetSetRadio.sceneGroup,
-    Scenes_WorldOfWarcraft.bcSceneGroup,
-    Scenes_WorldOfWarcraft.wotlkSceneGroup,
     Scenes_HalfLife.sceneGroup,
+    Scenes_CounterStrike.sceneGroup,
+    Scenes_TeamFortressClassic.sceneGroup,
+    Scenes_Quake.sceneGroup,
     Scenes_Left4Dead2.sceneGroup,
     Scenes_NeoTokyo.sceneGroup,
     Scenes_Morrowind.sceneGroup,
@@ -230,46 +257,19 @@ const sceneGroups: (string | SceneGroup)[] = [
     Scenes_AShortHike.sceneGroup,
     Scenes_NeonWhite.sceneGroup,
     Scenes_OuterWilds.sceneGroup,
+    Scenes_Descent1.sceneGroup,
+    Scenes_Descent2.sceneGroup,
+    Scenes_Descent2Vertigo.sceneGroup,
+    Scenes_TokyoMirageSessionsSharpFE.sceneGroup,
     Scenes_Dreamfall.sceneGroup,
 ];
 
-function convertCanvasToPNG(canvas: HTMLCanvasElement): Promise<Blob> {
-    return new Promise((resolve) => canvas.toBlob((b) => resolve(assertExists(b)), 'image/png'));
-}
-
-const enum SaveStatesAction {
+enum SaveStatesAction {
     Load,
     LoadDefault,
     Save,
     Delete
 };
-
-class AnimationLoop implements ViewerUpdateInfo {
-    public time: number = 0;
-    public webXRContext: WebXRContext | null = null;
-
-    public onupdate: ((updateInfo: ViewerUpdateInfo) => void);
-
-    // https://hackmd.io/lvtOckAtSrmIpZAwgtXptw#Use-requestPostAnimationFrame-not-requestAnimationFrame
-    // https://github.com/WICG/requestPostAnimationFrame
-    // https://github.com/gpuweb/gpuweb/issues/596#issuecomment-596769356
-
-    // XXX(jstpierre): Disabled for now. https://bugs.chromium.org/p/chromium/issues/detail?id=1065012
-    public useRequestPostAnimationFrame = false;
-
-    private _timeoutCallback = (): void => {
-        this.onupdate(this);
-    };
-
-    // Call this from within your requestAnimationFrame handler.
-    public requestPostAnimationFrame = (): void => {
-        this.time = window.performance.now();
-        if (this.useRequestPostAnimationFrame)
-            setTimeout(this._timeoutCallback, 0);
-        else
-            this.onupdate(this);
-    };
-}
 
 class SceneDatabase {
     private sceneDescToGroup = new Map<SceneDesc, SceneGroup>();
@@ -328,12 +328,41 @@ class SceneDatabase {
 
 type TimeState = { isPlaying: boolean, sceneTimeScale: number, sceneTime: number };
 
+class AnimationLoop {
+    public time: number = 0.0;
+    public fpsLimit: number = -1;
+
+    // Callback that will be called when we should render a frame.
+    public onupdate!: () => void;
+
+    // Call when a frame is requested from the underlying API.
+    public frameRequested = (): void => {
+        const newTime = window.performance.now();
+
+        if (this.fpsLimit > 0) {
+            const millisecondsPerFrame = 1000 / this.fpsLimit;
+            const millisecondsSinceLastFrame = newTime - this.time;
+
+            // Allow up to half a frame early.
+            const minNextFrameTime = millisecondsPerFrame / 2;
+
+            if (millisecondsSinceLastFrame < minNextFrameTime)
+                return;
+        }
+
+        this.time = newTime;
+        this.onupdate();
+    };
+}
+
 class Main {
     public toplevel: HTMLElement;
     public canvas: HTMLCanvasElement;
     public viewer: Viewer;
     public ui: UI;
     public saveManager = GlobalSaveManager;
+
+    private preferredPlatforms: GfxPlatform[] = [];
 
     private droppedFileGroup: SceneGroup;
     private sceneDatabase = new SceneDatabase(sceneGroups);
@@ -346,9 +375,13 @@ class Main {
     private dataFetcher: DataFetcher;
     private lastUpdatedURLTimeSeconds: number = -1;
 
-    private postAnimFrameCanvas = new AnimationLoop();
-    private postAnimFrameWebXR = new AnimationLoop();
     private webXRContext: WebXRContext;
+    private animationLoop = new AnimationLoop();
+
+    private updateInfo: ViewerUpdateInfo = {
+        time: 0.0,
+        webXRContext: null,
+    };
 
     public sceneTimeScale = 1.0;
     private isPlaying = false;
@@ -370,33 +403,6 @@ class Main {
         this.toplevel = document.createElement('div');
         document.body.appendChild(this.toplevel);
 
-        this.canvas = document.createElement('canvas');
-        this.canvas.style.imageRendering = 'pixelated';
-        this.canvas.style.outline = 'none';
-        this.canvas.style.touchAction = 'none';
-
-        this.toplevel.appendChild(this.canvas);
-        window.onresize = this._onResize.bind(this);
-        this._onResize();
-
-        await loadRustLib();
-
-        const errorCode = await initializeViewer(this, this.canvas);
-        if (errorCode !== InitErrorCode.SUCCESS) {
-            this.toplevel.appendChild(makeErrorUI(errorCode));
-            return;
-        }
-
-        this.webXRContext = new WebXRContext(this.viewer.gfxSwapChain);
-        this.webXRContext.onframe = this.postAnimFrameWebXR.requestPostAnimationFrame;
-
-        this.postAnimFrameCanvas.onupdate = this._onPostAnimFrameUpdate;
-
-        // requestPostAnimationFrame breaks WebXR.
-        this.postAnimFrameWebXR.webXRContext = this.webXRContext;
-        this.postAnimFrameWebXR.useRequestPostAnimationFrame = false;
-        this.postAnimFrameWebXR.onupdate = this._onPostAnimFrameUpdate;
-
         this.toplevel.ondragover = (e) => {
             if (!e.dataTransfer || !e.dataTransfer.types.includes('Files'))
                 return;
@@ -409,15 +415,16 @@ class Main {
         };
         this.toplevel.ondrop = this._onDrop.bind(this);
 
-        this.viewer.onstatistics = (statistics: RenderStatistics): void => {
-            this.ui.statisticsPanel.addRenderStatistics(statistics);
-        };
-        this.viewer.oncamerachanged = (force: boolean) => {
-            this._autoSaveState(force);
-        };
-        this.viewer.inputManager.ondraggingmodechanged = () => {
-            this.ui.setDraggingMode(this.viewer.inputManager.getDraggingMode());
-        };
+        await loadRustLib();
+
+        this.initializePlatforms();
+        if (!await this.initializeViewer()) {
+            return;
+        }
+
+        window.onresize = this._onResize.bind(this);
+
+        this.animationLoop.onupdate = this.animationLoopOnUpdate.bind(this);
 
         this._makeUI();
 
@@ -440,7 +447,116 @@ class Main {
             this.ui.sceneSelect.setExpanded(true);
         }
 
-        this._onRequestAnimationFrameCanvas();
+        this._onRequestAnimationFrame();
+    }
+
+    private _reloadCurrentSceneDesc(sceneSaveState: string | null = null): void {
+        if (sceneSaveState === null)
+            sceneSaveState = this._getSceneSaveState();
+        if (this.currentSceneDesc !== null)
+            this._loadSceneDesc(this.currentSceneDesc, sceneSaveState, true);
+    }
+
+    private initializePlatforms(): void {
+        let defaultPlatform = GfxPlatform.WebGL2;
+        if (location.search.includes('webgpu'))
+            defaultPlatform = GfxPlatform.WebGPU;
+
+        this.preferredPlatforms = [];
+        this.preferredPlatforms.push(defaultPlatform);
+        this.preferredPlatforms.push(defaultPlatform === GfxPlatform.WebGPU ? GfxPlatform.WebGL2 : GfxPlatform.WebGPU);
+    }
+
+    private async initializeViewer(): Promise<boolean> {
+        const platformsToTry = this.preferredPlatforms;
+        assert(platformsToTry.length !== 0);
+
+        // Create a new canvas.
+        const canvas = document.createElement('canvas');
+        const currentPlatform = this.viewer !== undefined ? this.viewer.gfxDevice.queryVendorInfo().platform : null;
+
+        // No sense in trying to recreate the current platform.
+        let error = InitErrorCode.SUCCESS;
+        for (let i = 0; i < platformsToTry.length; i++) {
+            const platform = platformsToTry[i];
+
+            // Already good.
+            if (platform === currentPlatform)
+                return true;
+
+            const ret = platform === GfxPlatform.WebGL2 ?
+                await initializeViewerWebGL2(canvas) :
+                await initializeViewerWebGPU(canvas);
+
+            error = ret.error;
+            if (error !== InitErrorCode.SUCCESS)
+                continue;
+
+            // Success; initialize.
+            if (this.canvas !== undefined)
+                this.toplevel.removeChild(this.canvas);
+
+            this.canvas = canvas;
+            this.canvas.style.imageRendering = 'pixelated';
+            this.canvas.style.outline = 'none';
+            this.canvas.style.touchAction = 'none';
+
+            // Immediately resize the canvas.
+            this._onResize();
+
+            this.toplevel.appendChild(this.canvas);
+
+            if (this.viewer !== undefined)
+                this._destroyScene();
+
+            assert(ret.viewer !== undefined);
+            this.viewer = ret.viewer;
+
+            this.webXRContext = new WebXRContext(this.viewer.gfxSwapChain);
+            this.webXRContext.onframe = this.animationLoop.frameRequested;
+            this.webXRContext.onsupportedchanged = this._syncWebXRSettingsVisible.bind(this);
+
+            this.viewer.onstatistics = (statistics: RenderStatistics): void => {
+                this.ui.statisticsPanel.addRenderStatistics(statistics);
+            };
+            this.viewer.oncamerachanged = (force: boolean) => {
+                this._autoSaveState(force);
+            };
+            this.viewer.inputManager.ondraggingmodechanged = () => {
+                this.ui.setDraggingMode(this.viewer.inputManager.getDraggingMode());
+            };
+
+            // HACK(jstpierre): Change the initialization here.
+            if (this.ui !== undefined) {
+                this.ui.setViewer(this.viewer);
+                this._syncWebXRSettingsVisible();
+            }
+
+            return true;
+        }
+
+        assert(error !== InitErrorCode.SUCCESS);
+        this.toplevel.appendChild(makeErrorUI(error));
+        return false;
+    }
+
+    private async _swapPlatforms() {
+        if (this.preferredPlatforms.length <= 1)
+            return;
+
+        const sceneSaveState = this._getSceneSaveState();
+
+        this._destroyScene();
+
+        // Wipe DataShare, since the data in there might be for the existing device/platform/
+        this.dataShare.pruneOldObjects(this.viewer.gfxDevice, 0);
+
+        // Shuffle around.
+        const platform = this.preferredPlatforms.shift()!;
+        this.preferredPlatforms.push(platform);
+        await this.initializeViewer();
+
+        this._reloadCurrentSceneDesc(sceneSaveState);
     }
 
     private setIsPlaying(v: boolean): void {
@@ -533,8 +649,10 @@ class Main {
             this.setIsPlaying(false);
             this.isFrameStep = true;
         }
+        if (inputManager.isKeyDownEventTriggered('F4'))
+            this._swapPlatforms();
         if (inputManager.isKeyDownEventTriggered('F9'))
-            this._loadSceneDesc(this.currentSceneDesc!, this._getSceneSaveState(), true);
+            this._reloadCurrentSceneDesc();
     }
 
     private async _onWebXRStateRequested(state: boolean) {
@@ -560,41 +678,38 @@ class Main {
         }
     }
 
-    private _onPostAnimFrameUpdate = (updateInfo: ViewerUpdateInfo): void => {
+    private animationLoopOnUpdate(): void {
         this._checkKeyShortcuts();
 
         prepareFrameDebugOverlayCanvas2D();
 
-        // Needs to be called before this.viewer.update()
-        const shouldTakeScreenshot = this.viewer.inputManager.isKeyDownEventTriggered('Numpad7') || this.viewer.inputManager.isKeyDownEventTriggered('BracketRight');
-
-        let sceneTimeScale = this.sceneTimeScale;
-        if (this.isFrameStep) {
-            sceneTimeScale /= 4.0;
-            this.isFrameStep = false;
-        } else if (!this.isPlaying) {
-            sceneTimeScale = 0.0;
-        }
-
         if (!this.viewer.externalControl) {
-            this.viewer.sceneTimeScale = sceneTimeScale;
-            this.viewer.update(updateInfo);
-        }
+            this.updateInfo.time = this.animationLoop.time;
+            this.updateInfo.webXRContext = this.webXRContext.xrSession !== null ? this.webXRContext : null;
 
-        if (shouldTakeScreenshot)
-            this._takeScreenshot();
+            let sceneTimeScale = this.sceneTimeScale;
+            if (this.isFrameStep) {
+                sceneTimeScale /= 4.0;
+                this.isFrameStep = false;
+            } else if (!this.isPlaying) {
+                sceneTimeScale = 0.0;
+            }
+
+            this.viewer.sceneTimeScale = sceneTimeScale;
+            this.viewer.update(this.updateInfo);
+        }
 
         this.ui.update();
     };
 
-    private _onRequestAnimationFrameCanvas = (): void => {
+    private _onRequestAnimationFrame = (): void => {
         if (this.webXRContext.xrSession !== null) {
             // Currently presenting to XR. Skip the canvas render.
         } else {
-            this.postAnimFrameCanvas.requestPostAnimationFrame();
+            this.animationLoop.frameRequested();
         }
 
-        window.requestAnimationFrame(this._onRequestAnimationFrameCanvas);
+        window.requestAnimationFrame(this._onRequestAnimationFrame);
     };
 
     private async _onDrop(e: DragEvent) {
@@ -830,14 +945,16 @@ class Main {
         }
     }
 
-    private loadSceneDelta = 1;
+    // How many previous scenes of data share contents to keep? Set it to 0 for leak checking.
+    private get loadSceneDelta(): number {
+        return this.saveManager.loadSetting("LoadSceneDelta", 1);
+    }
 
-    private _loadSceneDesc(sceneDesc: SceneDesc, sceneStateStr: string | null = null, force: boolean = false): void {
-        if (this.currentSceneDesc === sceneDesc && !force) {
-            this._loadSceneSaveState(sceneStateStr);
-            return;
-        }
+    private set loadSceneDelta(v: number) {
+        this.saveManager.saveSetting("LoadSceneDelta", v);
+    }
 
+    private _destroyScene(): void {
         const device = this.viewer.gfxDevice;
 
         // Tear down old scene.
@@ -850,21 +967,32 @@ class Main {
         for (let i = 0; i < this.destroyablePool.length; i++)
             this.destroyablePool[i].destroy(device);
         this.destroyablePool.length = 0;
+    }
 
+    private _loadSceneDesc(sceneDesc: SceneDesc, sceneStateStr: string | null = null, force: boolean = false): void {
+        if (this.currentSceneDesc === sceneDesc && !force) {
+            this._loadSceneSaveState(sceneStateStr);
+            return;
+        }
+
+        this._destroyScene();
         const sceneGroup = this.sceneDatabase.getSceneDescGroup(sceneDesc);
 
         // Unhide any hidden scene groups upon being loaded.
         if (sceneGroup.hidden)
             sceneGroup.hidden = false;
+        if (sceneDesc.hidden)
+            sceneDesc.hidden = false;
 
         this.currentSceneDesc = sceneDesc;
         this.ui.sceneSelect.setCurrentDesc(sceneGroup, this.currentSceneDesc);
 
         this.ui.sceneSelect.setProgress(0);
 
-        const dataShare = this.dataShare;
+        const device = this.viewer.gfxDevice;
         const dataFetcher = this.dataFetcher;
         dataFetcher.reset();
+        const dataShare = this.dataShare;
         const uiContainer: HTMLElement = document.createElement('div');
         this.ui.sceneUIContainer.appendChild(uiContainer);
         const destroyablePool: Destroyable[] = this.destroyablePool;
@@ -879,10 +1007,10 @@ class Main {
             device, dataFetcher, dataShare, uiContainer, destroyablePool, inputManager, viewerInput, initialSceneTime,
         };
 
-        // The age delta on pruneOldObjects determines whether any resources willf be shared at all.
-        // delta = 0 means that we destroy the set of resources used by the previous scene, before
-        // we increment the age below fore the "new" scene, which is the only proper way to do leak
-        // checking. Typically, we allow one old scene's worth of contents.
+        // We save loadSceneDelta's worth of old objects -- the idea being that if you're navigating between similar
+        // scenes, we want to keep stuff in the data share (e.g. going between two Mario Kart tracks, you want to
+        // keep the models for the same objects so we don't need to redownload them). Any objects that haven't been
+        // touched since then will get eliminated eventually.
         this.dataShare.pruneOldObjects(device, this.loadSceneDelta);
 
         if (this.loadSceneDelta === 0)
@@ -919,10 +1047,6 @@ class Main {
         this.ui.sceneSelect.onscenedescselected = this._onSceneDescSelected.bind(this);
         this.ui.xrSettings.onWebXRStateRequested = this._onWebXRStateRequested.bind(this);
         this.ui.playPauseButton.onplaypause = this.setIsPlaying.bind(this);
-
-        this.webXRContext.onsupportedchanged = () => {
-            this._syncWebXRSettingsVisible();
-        };
         this._syncWebXRSettingsVisible();
     }
 
@@ -939,12 +1063,6 @@ class Main {
         const sceneId = this.currentSceneDesc!.id;
         const date = new Date();
         return `${sceneGroup.id}_${sceneId}_${date.toISOString()}`;
-    }
-
-    private _takeScreenshot(opaque: boolean = true) {
-        const canvas = this.viewer.takeScreenshotToCanvas(opaque);
-        const filename = `${this._getSceneDownloadPrefix()}.png`;
-        convertCanvasToPNG(canvas).then((blob) => downloadBlob(filename, blob));
     }
 
     // Hooks for people who want to mess with stuff.

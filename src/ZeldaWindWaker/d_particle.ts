@@ -8,18 +8,18 @@ import { Frustum } from "../Geometry.js";
 import { GfxDevice } from "../gfx/platform/GfxPlatform.js";
 import { GfxRenderInstManager } from "../gfx/render/GfxRenderInstManager.js";
 import { EFB_HEIGHT, EFB_WIDTH } from "../gx/gx_material.js";
-import { computeModelMatrixR, getMatrixTranslation, saturate, transformVec3Mat4w0 } from "../MathHelpers.js";
+import { computeModelMatrixR, saturate, transformVec3Mat4w0 } from "../MathHelpers.js";
 import { TDDraw } from "../SuperMarioGalaxy/DDraw.js";
-import { TextureMapping } from "../TextureHolder.js";
-import { assert, nArray } from "../util.js";
+import { nArray } from "../util.js";
 import { ViewerRenderInput } from "../viewer.js";
 import { dKy_get_seacolor } from "./d_kankyo.js";
 import { cLib_addCalc2, cM_s2rad } from "./SComponent.js";
 import { dGlobals } from "./Main.js";
 import * as GX from '../gx/gx_enum.js';
-import { ColorKind } from "../gx/gx_render.js";
+import { ColorKind, GXTextureMapping } from "../gx/gx_render.js";
 import { gfxDeviceNeedsFlipY } from "../gfx/helpers/GfxDeviceHelpers.js";
 import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
+import { TJPACallback } from "../Common/JSYSTEM/JStudio.js";
 
 // Simple common particles
 const j_o_id: number[] = [ 0x0000, 0x0001, 0x0002, 0x0003, 0x03DA, 0x03DB, 0x03DC, 0x4004 ];
@@ -40,7 +40,7 @@ export abstract class dPa_levelEcallBack extends JPAEmitterCallBack {
     }
 }
 
-export const enum ParticleGroup {
+export enum ParticleGroup {
     Normal,
     NormalP1,
     Toon,
@@ -54,7 +54,7 @@ export const enum ParticleGroup {
     TwoDmenuBack,
 }
 
-function setTextureMappingIndirect(m: TextureMapping, flipY: boolean): void {
+function setTextureMappingIndirect(m: GXTextureMapping, flipY: boolean): void {
     m.width = EFB_WIDTH;
     m.height = EFB_HEIGHT;
     m.flipY = flipY;
@@ -62,7 +62,7 @@ function setTextureMappingIndirect(m: TextureMapping, flipY: boolean): void {
 }
 
 export class dPa_control_c {
-    private emitterManager: JPAEmitterManager;
+    public emitterManager: JPAEmitterManager;
     private drawInfo = new JPADrawInfo();
     private jpacData: JPACData[] = [];
     private resourceDatas = new Map<number, JPAResourceData>();
@@ -132,6 +132,10 @@ export class dPa_control_c {
             if (emitter.drawGroupId >= ParticleGroup.TwoDfore)
                 continue;
 
+            // Don't cull demo emitters
+            if (emitter.emitterCallBack instanceof TJPACallback)
+                continue;
+
             let cullDistance = (emitter as any).cullDistance;
             if (cullDistance === null)
                 continue;
@@ -153,6 +157,10 @@ export class dPa_control_c {
         this.emitterManager.draw(device, renderInstManager, this.drawInfo, drawGroupId);
     }
 
+    public prepareToRender(device: GfxDevice): void {
+        this.emitterManager.prepareToRender(device);
+    }
+
     private getRM_ID(userID: number): number {
         return userID >>> 15;
     }
@@ -167,13 +175,25 @@ export class dPa_control_c {
         return null;
     }
 
+    private patchResData(globals: dGlobals, resData: JPAResourceData): void {
+        const texIdx = resData.textureIds[resData.res.bsp1.texIdx];
+
+        // From dPa_simpleEcallBack::draw(). Fixup TEV settings for particles that access the framebuffer.  
+        if (resData.jpacData.textureMapping[texIdx].lateBinding === 'OpaqueSceneTexture') {
+            // Alpha = A0
+            resData.res.bsp1.alphaInSelect = 1;
+            resData.createMaterial(globals.modelCache.device);
+        }
+    }
+
     private getResData(globals: dGlobals, userIndex: number): JPAResourceData | null {
         if (!this.resourceDatas.has(userIndex)) {
             const data = this.findResData(userIndex);
             if (data !== null) {
                 const [jpacData, jpaResRaw] = data;
-                const device = globals.modelCache.device, cache = globals.modelCache.cache;
-                const resData = new JPAResourceData(device, cache, jpacData, jpaResRaw);
+                const cache = globals.modelCache.cache;
+                const resData = new JPAResourceData(cache, jpacData, jpaResRaw);
+                this.patchResData(globals, resData);
                 this.resourceDatas.set(userIndex, resData);
             } else {
                 return null;
@@ -223,7 +243,7 @@ export class dPa_control_c {
     }
 
     public setSimple(userID: number, pos: vec3, alpha: number, prmColor: Color, envColor: Color, isAffectedByWind: boolean): boolean {
-        const simple = this.simpleCallbacks.find(s => s.userID == userID);
+        const simple = this.simpleCallbacks.find(s => s.userID === userID);
         if (!simple)
             return false;
         return simple.set(pos, alpha / 0xFF, prmColor, envColor, isAffectedByWind);
@@ -260,17 +280,7 @@ class dPa_simpleEcallBack extends JPAEmitterCallBack {
             this.baseEmitter.maxFrame = 0;
             this.baseEmitter.stopCreateParticle();
 
-            // From dPa_simpleEcallBack::draw(). Fixup TEV settings for particles that access the framebuffer.  
-            if (groupID == ParticleGroup.Projection) {
-                const m = resData.materialHelper.material;
-                m.tevStages[0].alphaInA = GX.CA.ZERO;
-                m.tevStages[0].alphaInB = GX.CA.ZERO;
-                m.tevStages[0].alphaInC = GX.CA.ZERO;
-                m.tevStages[0].alphaInD = GX.CA.A0;
-                resData.materialHelper.materialInvalidated();
-            }
-
-            if (userID == 0xa06a || userID == 0xa410) {
+            if (userID === 0xa06a || userID === 0xa410) {
                 // TODO: Smoke callback
             }
         }
@@ -304,10 +314,10 @@ class dPa_simpleEcallBack extends JPAEmitterCallBack {
                     const particle = emitter.createParticle();
                     if (!particle)
                         break;
-                    
+
                     // NOTE: Overwriting this removes the influence of the local emitter translation (bem.emitterTrs)
                     //       I.e. all simple emitters ignore their local offsets and are fixed to the local origin.
-                    vec3.copy(particle.offsetPosition, simple.pos);
+                    vec3.copy(particle.globalPosition, simple.pos);
                     if (simple.isAffectedByWind) {
                         // TODO: Wind callback
                     }
@@ -386,7 +396,7 @@ export class dPa_waveEcallBack extends dPa_levelEcallBack {
     private rot: ReadonlyVec3;
     private rotMtx = mat4.create();
 
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('dPa_waveEcallBack');
 
     constructor(protected override globals: dGlobals) {
         super(globals);
@@ -437,7 +447,7 @@ export class dPa_waveEcallBack extends dPa_levelEcallBack {
         const renderInst = ddraw.endDrawAndMakeRenderInst(renderInstManager);
         renderInst.sortKey = workData.particleSortKey;
         dKy_get_seacolor(this.globals.g_env_light, workData.materialParams.u_Color[ColorKind.C0], workData.materialParams.u_Color[ColorKind.C1]);
-        workData.fillParticleRenderInst(device, renderInstManager, renderInst);
+        workData.fillParticleRenderInst(renderInstManager, renderInst);
         renderInstManager.submitRenderInst(renderInst);
     }
 
@@ -485,7 +495,7 @@ export class dPa_trackEcallBack extends dPa_levelEcallBack {
     private rot: ReadonlyVec3;
     private alpha: number = 1.0;
 
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('dPa_trackEcallBack');
 
     public vel: number = 0.0;
     public minVel: number = 3.0;
@@ -551,7 +561,7 @@ export class dPa_trackEcallBack extends dPa_levelEcallBack {
 
         const renderInst = ddraw.endDrawAndMakeRenderInst(renderInstManager);
         renderInst.sortKey = workData.particleSortKey;
-        workData.fillParticleRenderInst(device, renderInstManager, renderInst);
+        workData.fillParticleRenderInst(renderInstManager, renderInst);
         renderInstManager.submitRenderInst(renderInst);
     }
 
@@ -598,7 +608,7 @@ export class dPa_trackEcallBack extends dPa_levelEcallBack {
 
         for (let i = 0; i < emitter.aliveParticlesBase.length; i++) {
             const particle = emitter.aliveParticlesBase[i];
-            this.getMaxWaterY(particle.offsetPosition);
+            this.getMaxWaterY(particle.globalPosition);
         }
     }
 

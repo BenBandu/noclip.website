@@ -16,15 +16,14 @@ import { GridPlane } from "./GridPlane.js";
 import { getDebugOverlayCanvas2D, drawWorldSpacePoint } from "../DebugJunk.js";
 import { createCsvParser } from "../SuperMarioGalaxy/JMapInfo.js";
 import { JKRArchive } from "../Common/JSYSTEM/JKRArchive.js";
-import { fillSceneParamsDataOnTemplate, ub_SceneParamsBufferSize, gxBindingLayouts } from "../gx/gx_render.js";
-import { TextureMapping } from "../TextureHolder.js";
+import { fillSceneParamsDataOnTemplate, ub_SceneParamsBufferSize, gxBindingLayouts, GXTextureMapping } from "../gx/gx_render.js";
 import { EFB_WIDTH, EFB_HEIGHT, GX_Program } from "../gx/gx_material.js";
 import { NamedArrayBufferSlice } from "../DataFetcher.js";
 import { FloatingPanel } from "../DebugFloaters.js";
 import { GfxrAttachmentSlot } from "../gfx/render/GfxRenderGraph.js";
 import { gfxDeviceNeedsFlipY } from "../gfx/helpers/GfxDeviceHelpers.js";
 
-function setLateTextureMapping(m: TextureMapping, lateBinding: string, flipY: boolean): void {
+function setLateTextureMapping(m: GXTextureMapping, lateBinding: string, flipY: boolean): void {
     m.lateBinding = lateBinding;
     m.width = EFB_WIDTH;
     m.height = EFB_HEIGHT;
@@ -77,12 +76,12 @@ class BasicEffectSystem {
         return false;
     }
 
-    private getResourceData(device: GfxDevice, cache: GfxRenderCache, userIndex: number): JPA.JPAResourceData | null {
+    private getResourceData(cache: GfxRenderCache, userIndex: number): JPA.JPAResourceData | null {
         if (!this.resourceDatas.has(userIndex)) {
             const data = this.findResourceData(userIndex);
             if (data !== null) {
                 const [jpacData, jpaResRaw] = data;
-                const resData = new JPA.JPAResourceData(device, cache, jpacData, jpaResRaw);
+                const resData = new JPA.JPAResourceData(cache, jpacData, jpaResRaw);
                 this.resourceDatas.set(userIndex, resData);
             }
         }
@@ -104,12 +103,16 @@ class BasicEffectSystem {
         this.emitterManager.draw(device, renderInstManager, this.drawInfo, drawGroupId);
     }
 
+    public prepareToRender(device: GfxDevice): void {
+        this.emitterManager.prepareToRender(device);
+    }
+
     public forceDeleteEmitter(emitter: JPA.JPABaseEmitter): void {
         this.emitterManager.forceDeleteEmitter(emitter);
     }
 
-    public createBaseEmitter(device: GfxDevice, cache: GfxRenderCache, resourceId: number): JPA.JPABaseEmitter {
-        const resData = assertExists(this.getResourceData(device, cache, resourceId));
+    public createBaseEmitter(cache: GfxRenderCache, resourceId: number): JPA.JPABaseEmitter {
+        const resData = assertExists(this.getResourceData(cache, resourceId));
         const emitter = this.emitterManager.createEmitter(resData)!;
         return emitter;
     }
@@ -197,7 +200,7 @@ function makeDataList(strings: string[]): HTMLDataListElement {
     return datalist;
 }
 
-const enum EfGroup { Main, Indirect }
+enum EfGroup { Main, Indirect }
 
 const clearPass = makeAttachmentClearDescriptor(colorNewFromRGBA(0.2, 0.2, 0.2, 1.0));
 const scratchVec3 = vec3.create();
@@ -384,7 +387,7 @@ export class Explorer implements SceneGfx {
 
     private createEmitter(effectIndex = this.currentEffectIndex): void {
         const resourceId = this.jpac.effects[effectIndex].resourceId;
-        const newEmitter = this.effectSystem.createBaseEmitter(this.context.device, this.renderHelper.renderCache, resourceId);
+        const newEmitter = this.effectSystem.createBaseEmitter(this.renderHelper.renderCache, resourceId);
         newEmitter.drawGroupId = this.effectSystem.resourceDataUsesFB(newEmitter.resData) ? EfGroup.Indirect : EfGroup.Main;
         this.emitters.push(newEmitter);
     }
@@ -468,6 +471,8 @@ export class Explorer implements SceneGfx {
             this.effectSystem.draw(device, this.renderHelper.renderInstManager, EfGroup.Indirect);
         }
 
+        this.effectSystem.prepareToRender(device);
+
         renderInstManager.popTemplate();
 
         this.renderHelper.prepareToRender();
@@ -501,7 +506,7 @@ export class Explorer implements SceneGfx {
 
             pass.exec((passRenderer, scope) => {
                 const opaqueSceneTexture = scope.getResolveTextureForID(opaqueSceneTextureID);
-                this.indirectList.resolveLateSamplerBinding('opaque-scene-texture', { gfxTexture: opaqueSceneTexture, gfxSampler: null, lateBinding: null });
+                this.indirectList.resolveLateSamplerBinding('opaque-scene-texture', { gfxTexture: opaqueSceneTexture, gfxSampler: null });
                 this.indirectList.drawOnPassRenderer(renderInstManager.gfxRenderCache, passRenderer);
             });
         });
@@ -509,7 +514,7 @@ export class Explorer implements SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
     }
 
     public destroy(device: GfxDevice) {

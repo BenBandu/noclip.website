@@ -1,16 +1,14 @@
 // Credits to chmcl for initial GMA/TPL support (https://github.com/ch-mcl/)
 
-import { GfxDevice, GfxMipFilterMode, GfxTexFilterMode } from "../gfx/platform/GfxPlatform.js";
-import { GfxSampler } from "../gfx/platform/GfxPlatformImpl.js";
-import { LoadedTexture, TextureMapping } from "../TextureHolder.js";
-import * as Gma from "./Gma.js";
-import * as GX from "../gx/gx_enum.js";
-import { TextureCache } from "./ModelCache.js";
-import { translateWrapModeGfx } from "../gx/gx_render.js";
+import { GfxDevice, GfxMipFilterMode, GfxSampler, GfxTexFilterMode, GfxTexture } from "../gfx/platform/GfxPlatform.js";
 import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
+import * as GX from "../gx/gx_enum.js";
+import { GXTextureMapping, translateWrapModeGfx } from "../gx/gx_render.js";
+import * as Gma from "./Gma.js";
+import { TextureCache } from "./ModelCache.js";
 
 export class TevLayerInst {
-    private loadedTex: LoadedTexture;
+    private loadedTex: GfxTexture;
     private gfxSampler: GfxSampler;
 
     constructor(
@@ -46,8 +44,8 @@ export class TevLayerInst {
         });
     }
 
-    public fillTextureMapping(mapping: TextureMapping): void {
-        mapping.gfxTexture = this.loadedTex.gfxTexture;
+    public fillTextureMapping(mapping: GXTextureMapping): void {
+        mapping.gfxTexture = this.loadedTex;
         mapping.gfxSampler = this.gfxSampler;
     }
 }

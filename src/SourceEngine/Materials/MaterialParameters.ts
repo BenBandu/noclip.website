@@ -2,12 +2,12 @@
 import { mat4, vec3 } from "gl-matrix";
 import { TextureMapping } from "../../TextureHolder.js";
 import { assert, assertExists, nArray, nullify } from "../../util.js";
-import { SourceRenderContext } from "../Main.js";
+import type { SourceRenderContext } from "../Main.js";
 import { VKFParamMap, VMT, vmtParseVector } from "../VMT.js";
-import { VTF } from "../VTF.js";
+import type { VTF } from "../VTF.js";
 import { MathConstants, clamp, invlerp, lerp } from "../../MathHelpers.js";
 import { Color, colorFromRGBA } from "../../Color.js";
-import { MaterialCache } from "./MaterialCache.js";
+import type { MaterialCache } from "./MaterialCache.js";
 import { BaseMaterial, EntityMaterialParameters } from "./MaterialBase.js";
 
 interface Parameter {
@@ -54,6 +54,10 @@ export class ParameterTexture {
             }
 
             this.texture = await materialCache.fetchVTF(filename, this.isSRGB);
+
+            // Some envmap assignments appear to use spherical envmaps; e.g. HL2's dirtfloor003b.vmt uses envmap001a.vtf which is a spherical map.
+            if (this.isEnvmap && !this.texture.isCubemap())
+                this.texture = null;
         }
     }
 
@@ -130,6 +134,7 @@ function findall(haystack: string, needle: RegExp): RegExpExecArray[] {
 const scratchMat4a = mat4.create();
 export class ParameterMatrix {
     public matrix = mat4.create();
+    public defined = false;
 
     public setMatrix(cx: number, cy: number, sx: number, sy: number, r: number, tx: number, ty: number): void {
         mat4.identity(this.matrix);
@@ -143,6 +148,7 @@ export class ParameterMatrix {
         scratchMat4a[12] = cx + tx;
         scratchMat4a[13] = cy + ty;
         mat4.mul(this.matrix, scratchMat4a, this.matrix);
+        this.defined = true;
     }
 
     public parse(S: string): void {
@@ -372,6 +378,24 @@ export function paramGetNum(map: ParameterMap, ref: ParameterReference): number 
     return paramLookup<ParameterNumber>(map, ref).value;
 }
 
+function paramSetBinOp(map: ParameterMap, dstRef: ParameterReference, src1Ref: ParameterReference, src2Ref: ParameterReference, func: (a: number, b: number) => number): void {
+    const dst = paramLookup(map, dstRef);
+    const src1 = paramLookup(map, src1Ref);
+    const src2 = paramLookup(map, src2Ref);
+
+    if (src1 instanceof ParameterVector) {
+        assert(dst instanceof ParameterVector);
+        for (let i = 0; i < dst.internal.length; i++)
+            dst.internal[i].value = func(src1.get(i), (src2 instanceof ParameterVector) ? src2.get(i) : (src2 as ParameterNumber).value);
+    } else if (src2 instanceof ParameterVector) {
+        assert(dst instanceof ParameterVector);
+        for (let i = 0; i < dst.internal.length; i++)
+            dst.internal[i].value = func((src1 instanceof ParameterVector) ? src1.get(i) : (src1 as ParameterNumber).value, src2.get(i));
+    } else {
+        paramSetNum(map, dstRef, func((src1 as ParameterNumber).value, (src2 as ParameterNumber).value));
+    }
+}
+
 export function paramSetNum(map: ParameterMap, ref: ParameterReference, v: number): void {
     const param = paramLookupOptional(map, ref);
     if (param === null) {
@@ -420,6 +444,7 @@ export class MaterialProxySystem {
         this.registerProxyFactory(MaterialProxy_ToggleTexture);
         this.registerProxyFactory(MaterialProxy_EntityRandom);
         this.registerProxyFactory(MaterialProxy_FizzlerVortex);
+        this.registerProxyFactory(MaterialProxy_YellowLevel);
     }
 
     public registerProxyFactory(factory: MaterialProxyFactory): void {
@@ -447,6 +472,8 @@ export class MaterialProxyDriver {
     }
 
     public update(renderContext: SourceRenderContext, entityParams: EntityMaterialParameters | null): void {
+        if ((this as any).debug)
+            debugger;
         for (let i = 0; i < this.proxies.length; i++)
             this.proxies[i].update(this.material.param, renderContext, entityParams);
     }
@@ -488,7 +515,7 @@ class MaterialProxy_Add {
     }
 
     public update(map: ParameterMap, renderContext: SourceRenderContext): void {
-        paramSetNum(map, this.resultvar, paramGetNum(map, this.srcvar1) + paramGetNum(map, this.srcvar2));
+        paramSetBinOp(map, this.resultvar, this.srcvar1, this.srcvar2, (a, b) => a + b);
     }
 }
 
@@ -506,7 +533,7 @@ class MaterialProxy_Subtract {
     }
 
     public update(map: ParameterMap, renderContext: SourceRenderContext): void {
-        paramSetNum(map, this.resultvar, paramGetNum(map, this.srcvar1) - paramGetNum(map, this.srcvar2));
+        paramSetBinOp(map, this.resultvar, this.srcvar1, this.srcvar2, (a, b) => a - b);
     }
 }
 
@@ -524,7 +551,7 @@ class MaterialProxy_Multiply {
     }
 
     public update(map: ParameterMap, renderContext: SourceRenderContext): void {
-        paramSetNum(map, this.resultvar, paramGetNum(map, this.srcvar1) * paramGetNum(map, this.srcvar2));
+        paramSetBinOp(map, this.resultvar, this.srcvar1, this.srcvar2, (a, b) => a * b);
     }
 }
 
@@ -920,6 +947,20 @@ class MaterialProxy_FizzlerVortex {
         if (param === undefined)
             return;
         param.value = 1.0;
+    }
+}
+
+class MaterialProxy_YellowLevel {
+    public static type = `yellowlevel`;
+
+    private resultvar: ParameterReference;
+
+    constructor(params: VKFParamMap) {
+        this.resultvar = new ParameterReference(params.resultvar);
+    }
+
+    public update(map: ParameterMap, renderContext: SourceRenderContext, entityParams: EntityMaterialParameters | null): void {
+        paramSetNum(map, this.resultvar, 1);
     }
 }
 //#endregion

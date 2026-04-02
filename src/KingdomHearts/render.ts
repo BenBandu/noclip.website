@@ -5,32 +5,19 @@ import * as UI from '../ui.js';
 import * as Viewer from '../viewer.js';
 import { makeBackbufferDescSimple, opaqueBlackFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers.js';
 import { DeviceProgram } from "../Program.js";
-import { fillMatrix4x3, fillMatrix4x4 } from '../gfx/helpers/UniformBufferHelpers.js';
-import { GfxBindingLayoutDescriptor, GfxBlendFactor, GfxBlendMode, GfxBuffer, GfxBufferUsage, GfxCompareMode, GfxCullMode, GfxDevice, GfxFormat, GfxInputLayout, GfxMipFilterMode, GfxRenderPass, GfxSampler, GfxTexFilterMode, GfxTexture, GfxTextureDimension, GfxVertexAttributeDescriptor, GfxVertexBufferFrequency, GfxWrapMode, GfxProgram, GfxMegaStateDescriptor, GfxInputLayoutBufferDescriptor, makeTextureDescriptor2D, GfxVertexBufferDescriptor, GfxIndexBufferDescriptor } from '../gfx/platform/GfxPlatform.js';
-import { makeStaticDataBuffer } from '../gfx/helpers/BufferHelpers.js';
+import { fillMatrix4x3, fillMatrix4x4, fillVec4 } from '../gfx/helpers/UniformBufferHelpers.js';
+import { GfxBindingLayoutDescriptor, GfxBlendFactor, GfxBlendMode, GfxBuffer, GfxBufferUsage, GfxCompareMode, GfxCullMode, GfxDevice, GfxFormat, GfxInputLayout, GfxMipFilterMode, GfxRenderPass, GfxSampler, GfxTexFilterMode, GfxTexture, GfxTextureDimension, GfxVertexAttributeDescriptor, GfxVertexBufferFrequency, GfxWrapMode, GfxProgram, GfxMegaStateDescriptor, GfxInputLayoutBufferDescriptor, makeTextureDescriptor2D, GfxVertexBufferDescriptor, GfxIndexBufferDescriptor, GfxBufferFrequencyHint } from '../gfx/platform/GfxPlatform.js';
+import { createBufferFromData } from '../gfx/helpers/BufferHelpers.js';
 import { mat4, vec2, vec4 } from 'gl-matrix';
-import { TextureHolder, TextureMapping } from '../TextureHolder.js';
+import { FakeTextureHolder, TextureHolder, TextureMapping } from '../TextureHolder.js';
 import { nArray, assertExists } from '../util.js';
 import { GfxRenderInstList, GfxRenderInstManager } from '../gfx/render/GfxRenderInstManager.js';
 import { reverseDepthForCompareMode } from '../gfx/helpers/ReversedDepthHelpers.js';
 import { setAttachmentStateSimple } from '../gfx/helpers/GfxMegaStateDescriptorHelpers.js';
 import { GfxrAttachmentSlot } from '../gfx/render/GfxRenderGraph.js';
 import { GfxRenderHelper } from '../gfx/render/GfxRenderHelper.js';
-import { convertToCanvas } from '../gfx/helpers/TextureConversionHelpers.js';
-import ArrayBufferSlice from '../ArrayBufferSlice.js';
 import { GfxRenderCache } from '../gfx/render/GfxRenderCache.js';
 import { GfxShaderLibrary } from '../gfx/helpers/GfxShaderLibrary.js';
-
-export function textureToCanvas(texture: BinTex.Texture): Viewer.Texture {
-    const canvas = convertToCanvas(ArrayBufferSlice.fromView(texture.pixels()), texture.width(), texture.height());
-    const name = texture.name();
-    canvas.title = name;
-
-    const surfaces = [canvas];
-    const extraInfo = new Map<string, string>();
-    extraInfo.set('Format', texture.parent.format);
-    return { name: name, surfaces, extraInfo };
-}
 
 class KingdomHeartsProgram extends DeviceProgram {
     public static a_Position = 0;
@@ -45,7 +32,7 @@ class KingdomHeartsProgram extends DeviceProgram {
     public static ub_DrawParams = 1;
 
     public override both = `
-precision mediump float;
+precision highp float;
 
 ${GfxShaderLibrary.MatrixLibrary}
 
@@ -158,6 +145,7 @@ export class MapData {
     public indexBufferDescriptor: GfxIndexBufferDescriptor;
 
     public textures: GfxTexture[] = [];
+    public viewerTextures: Viewer.Texture[] = [];
     public sampler: GfxSampler;
 
     public layers: Layer[] = [];
@@ -168,14 +156,22 @@ export class MapData {
     private indices = 0;
 
     constructor(device: GfxDevice, cache: GfxRenderCache, bin: Bin.BIN) {
-        this.textures.push(this.translateTextureFromAtlas(device, bin.mapTextureAtlas));
+        const mapTextureAtlas = this.translateTextureFromAtlas(device, bin.mapTextureAtlas);
+        this.textures.push(mapTextureAtlas);
+        this.viewerTextures.push(this.createViewerTexture(null, mapTextureAtlas));
         const skyboxTexIndexMap : Map<number, number> = new Map();
         for (let i = 0; i < bin.sky0TextureBlocks.length; i++) {
-            this.textures.push(this.translateTexture(device, bin.sky0TextureBlocks[i].textures[0]));
+            const texture = bin.sky0TextureBlocks[i].textures[0];
+            const gfxTexture = this.translateTexture(device, texture);
+            this.textures.push(gfxTexture);
+            this.viewerTextures.push(this.createViewerTexture(texture, gfxTexture));
             skyboxTexIndexMap.set(bin.sky0TextureBlocks[i].dataOffs, i + 1);
         }
         for (let i = 0; i < bin.sky1TextureBlocks.length; i++) {
-            this.textures.push(this.translateTexture(device, bin.sky1TextureBlocks[i].textures[0]));
+            const texture = bin.sky1TextureBlocks[i].textures[0];
+            const gfxTexture = this.translateTexture(device, texture);
+            this.textures.push(gfxTexture);
+            this.viewerTextures.push(this.createViewerTexture(texture, gfxTexture));
             skyboxTexIndexMap.set(bin.sky1TextureBlocks[i].dataOffs, bin.sky0TextureBlocks.length + i + 1);
         }
         this.sampler = this.createSampler(cache);
@@ -281,8 +277,8 @@ export class MapData {
             n += submesh.vtx.length;
         });
 
-        this.vertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, vBuf.buffer);
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, iBuf.buffer);
+        this.vertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, vBuf.buffer);
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, iBuf.buffer);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: KingdomHeartsProgram.a_Position, bufferIndex: 0, format: GfxFormat.F32_RGB, bufferByteOffset: 0*0x04, },
@@ -304,9 +300,9 @@ export class MapData {
         });
 
         this.vertexBufferDescriptors = [
-            { buffer: this.vertexBuffer, byteOffset: 0, },
+            { buffer: this.vertexBuffer },
         ];
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0 };
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
     }
 
     private createBatchedDrawCalls(isSkybox: boolean, meshes: Bin.Mesh[], skyboxTexIndexMap: Map<number, number>, submeshesOut: Bin.Submesh[], layersOut: Layer[]): DrawCall[] {
@@ -414,10 +410,16 @@ export class MapData {
         return gfxTexture;
     }
 
+    private createViewerTexture(texture: BinTex.Texture | null, gfxTexture: GfxTexture): Viewer.Texture {
+        const extraInfo = new Map<string, string>();
+        if (texture !== null)
+            extraInfo.set('Format', texture.parent.format);
+        return { gfxTexture, extraInfo };
+    }
+
     private translateTextureFromAtlas(device: GfxDevice, textureAtlas: BinTex.TextureAtlas) {
         const gfxTexture = device.createTexture(makeTextureDescriptor2D(GfxFormat.U8_RGBA_NORM, textureAtlas.width, textureAtlas.height, 1));
-        // device.setResourceName(gfxTexture, texture.name());
-
+        device.setResourceName(gfxTexture, "Texture Atlas");
         device.uploadTextureData(gfxTexture, 0, [assertExists(textureAtlas.pixels)]);
         return gfxTexture;
     }
@@ -504,9 +506,10 @@ class DrawCallInstance {
 
         if (this.drawCall.spriteAnim) {
             this.drawCall.spriteAnim.getUVOffset(viewerInput.time, uvAnimOffsetScratch);
-            mapped[offs++] = uvAnimOffsetScratch[0];
-            mapped[offs++] = uvAnimOffsetScratch[1];
+        } else {
+            vec2.zero(uvAnimOffsetScratch);
         }
+        offs += fillVec4(mapped, offs, uvAnimOffsetScratch[0], uvAnimOffsetScratch[1], 0, 0);
 
         renderInstManager.submitRenderInst(renderInst);
     }
@@ -596,16 +599,19 @@ export class KingdomHeartsRenderer implements Viewer.SceneGfx {
     private renderInstListMain = new GfxRenderInstList();
     private skyRenderer: SceneRenderer;
     private mapRenderer: SceneRenderer;
+    public textureHolder: TextureHolder;
 
     private mapData: MapData;
 
-    constructor(device: GfxDevice, public textureHolder: TextureHolder<any>, bin: Bin.BIN) {
+    constructor(device: GfxDevice, bin: Bin.BIN) {
         this.renderHelper = new GfxRenderHelper(device);
 
         this.mapData = new MapData(device, this.renderHelper.renderCache, bin);
 
         this.mapRenderer = new SceneRenderer(device, this.mapData, this.mapData.mapDrawCalls, /*isSkybox=*/false);
         this.skyRenderer = new SceneRenderer(device, this.mapData, this.mapData.skyboxDrawCalls, /*isSkybox=*/true);
+
+        this.textureHolder = new FakeTextureHolder(this.mapData.viewerTextures);
     }
 
     public createPanels(): UI.Panel[] {
@@ -672,7 +678,7 @@ export class KingdomHeartsRenderer implements Viewer.SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListMain.reset();
         this.renderInstListSky.reset();
     }

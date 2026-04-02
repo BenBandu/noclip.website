@@ -43,7 +43,7 @@ function parseDZSHeaders(buffer: ArrayBufferSlice): DZS {
     return { headers: chunkHeaders, buffer };
 }
 
-export const enum ResType {
+export enum ResType {
     Model, Bmt, Bck, Bpk, Brk, Btp, Btk, Bti, Dzb, Dzs, Bva, Blo, Stb, Raw,
 }
 
@@ -114,7 +114,7 @@ export class dRes_control_c {
         const resInfo = assertExists(this.findResInfo(arcName, resList));
         return resInfo.getResByID(resType, resID);
     }
-    
+
     public getResResolver(arcName: string): ResourceResolver<JUTResType> {
         return (resType: JUTResType, resName: string) => {
             switch(resType) {
@@ -233,7 +233,7 @@ export class dRes_info_c {
         if (type === `BMD ` || type === `BMDM` || type === `BMDC` || type === `BMDS` || type === `BSMD` ||
             type === `BDL ` || type === `BDLM` || type === `BDLC` || type === `BDLI`) {
             // J3D models.
-            const res = new J3DModelData(device, cache, BMD.parse(file.buffer));
+            const res = new J3DModelData(device, cache, BMD.parse(file.buffer), file.name);
             this.destroyables.push(res);
             resEntry.res = res;
         } else if (type === `BMT ` || type === `BMTM`) {

@@ -1,38 +1,37 @@
 
+import { TextureHolder, TextureMapping } from '../TextureHolder.js';
 import * as Viewer from '../viewer.js';
-import { TextureHolder, LoadedTexture, TextureMapping } from '../TextureHolder.js';
 
-import { GfxDevice, GfxSampler, GfxWrapMode, GfxMipFilterMode, GfxTexFilterMode, GfxCullMode, GfxCompareMode, GfxInputLayout, GfxBuffer, GfxBufferUsage, GfxFormat, GfxVertexAttributeDescriptor, GfxVertexBufferFrequency, GfxVertexBufferDescriptor, GfxBindingLayoutDescriptor, GfxBlendMode, GfxBlendFactor, GfxProgram, GfxMegaStateDescriptor, GfxIndexBufferDescriptor, GfxInputLayoutBufferDescriptor, makeTextureDescriptor2D, GfxChannelWriteMask } from '../gfx/platform/GfxPlatform.js';
+import { GfxBindingLayoutDescriptor, GfxBlendFactor, GfxBlendMode, GfxBuffer, GfxBufferFrequencyHint, GfxBufferUsage, GfxChannelWriteMask, GfxCompareMode, GfxCullMode, GfxDevice, GfxFormat, GfxIndexBufferDescriptor, GfxInputLayout, GfxInputLayoutBufferDescriptor, GfxMegaStateDescriptor, GfxMipFilterMode, GfxProgram, GfxSampler, GfxTexFilterMode, GfxVertexAttributeDescriptor, GfxVertexBufferDescriptor, GfxVertexBufferFrequency, GfxWrapMode, makeTextureDescriptor2D } from '../gfx/platform/GfxPlatform.js';
 
-import * as BNTX from '../fres_nx/bntx.js';
-import { surfaceToCanvas } from '../Common/bc_texture.js';
-import { translateImageFormat, deswizzle, decompress, getImageFormatString } from '../fres_nx/tegra_texture.js';
-import { FMDL, FSHP, FMAT, FMAT_RenderInfo, FMAT_RenderInfoType, FVTX, FSHP_Mesh, FRES, FVTX_VertexAttribute, FVTX_VertexBuffer, parseFMAT_ShaderParam_Float4, FMAT_ShaderParam, parseFMAT_ShaderParam_Color3, parseFMAT_ShaderParam_Float, parseFMAT_ShaderParam_Texsrt, parseFMAT_ShaderParam_Float2, FMAT_ShaderAssign } from '../fres_nx/bfres.js';
-import { GfxRenderInst, makeSortKey, GfxRendererLayer, setSortKeyDepth, GfxRenderInstManager, GfxRenderInstList } from '../gfx/render/GfxRenderInstManager.js';
-import { TextureAddressMode, FilterMode, IndexFormat, AttributeFormat, getChannelFormat, getTypeFormat } from '../fres_nx/nngfx_enum.js';
-import { nArray, assert, assertExists, fallbackUndefined } from '../util.js';
-import { makeStaticDataBuffer, makeStaticDataBufferFromSlice } from '../gfx/helpers/BufferHelpers.js';
-import { fillMatrix4x4, fillMatrix4x3, fillVec4v, fillColor, fillVec3v, fillMatrix4x2, fillVec4 } from '../gfx/helpers/UniformBufferHelpers.js';
 import { mat4, ReadonlyMat4, vec2, vec3, vec4 } from 'gl-matrix';
-import { computeViewSpaceDepthFromWorldSpaceAABB } from '../Camera.js';
-import { AABB } from '../Geometry.js';
-import { reverseDepthForCompareMode } from '../gfx/helpers/ReversedDepthHelpers.js';
-import { DeviceProgram } from '../Program.js';
-import { GfxRenderCache } from '../gfx/render/GfxRenderCache.js';
-import { GfxRenderHelper } from '../gfx/render/GfxRenderHelper.js';
-import { makeBackbufferDescSimple, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers.js';
-import { GfxrAttachmentSlot } from '../gfx/render/GfxRenderGraph.js';
 import ArrayBufferSlice from '../ArrayBufferSlice.js';
+import { computeViewSpaceDepthFromWorldSpaceAABB } from '../Camera.js';
+import { FMAT, FMAT_RenderInfo, FMAT_RenderInfoType, FMAT_ShaderParam, FMDL, FRES, FSHP, FSHP_Mesh, FVTX, FVTX_VertexAttribute, FVTX_VertexBuffer, parseFMAT_ShaderParam_Color3, parseFMAT_ShaderParam_Float, parseFMAT_ShaderParam_Float2, parseFMAT_ShaderParam_Float4, parseFMAT_ShaderParam_Texsrt } from '../fres_nx/bfres.js';
+import * as BNTX from '../fres_nx/bntx.js';
+import { AttributeFormat, FilterMode, getChannelFormat, getTypeFormat, IndexFormat, TextureAddressMode } from '../fres_nx/nngfx_enum.js';
+import { decompress, deswizzle, getImageFormatString, translateImageFormat } from '../fres_nx/tegra_texture.js';
+import { AABB } from '../Geometry.js';
 import { GfxShaderLibrary, glslGenerateFloat } from '../gfx/helpers/GfxShaderLibrary.js';
+import { makeBackbufferDescSimple, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers.js';
+import { reverseDepthForCompareMode } from '../gfx/helpers/ReversedDepthHelpers.js';
+import { fillColor, fillMatrix4x2, fillMatrix4x3, fillMatrix4x4, fillVec3v, fillVec4, fillVec4v } from '../gfx/helpers/UniformBufferHelpers.js';
+import { GfxRenderCache } from '../gfx/render/GfxRenderCache.js';
+import { GfxrAttachmentSlot } from '../gfx/render/GfxRenderGraph.js';
+import { GfxRenderHelper } from '../gfx/render/GfxRenderHelper.js';
+import { GfxRendererLayer, GfxRenderInst, GfxRenderInstList, GfxRenderInstManager, makeSortKey, setSortKeyDepth } from '../gfx/render/GfxRenderInstManager.js';
 import { getMatrixTranslation, MathConstants, Vec3Zero } from '../MathHelpers.js';
+import { DeviceProgram } from '../Program.js';
+import { assert, assertExists, nArray } from '../util.js';
 
-import * as SARC from "../fres_nx/sarc.js";
-import * as AGLLightMap from './AGLParameter_LightMap.js';
-import * as AGLEnv from './AGLParameter_Env.js';
-import { colorNewCopy, colorScale, OpaqueBlack, White } from '../Color.js';
 import { IS_DEVELOPMENT } from '../BuildVersion.js';
+import { colorNewCopy, colorScale, OpaqueBlack, White } from '../Color.js';
+import * as SARC from "../fres_nx/sarc.js";
+import * as AGLEnv from './AGLParameter_Env.js';
+import * as AGLLightMap from './AGLParameter_LightMap.js';
+import { createBufferFromData, createBufferFromSlice } from '../gfx/helpers/BufferHelpers.js';
 
-export class BRTITextureHolder extends TextureHolder<BNTX.BRTI> {
+export class BRTITextureHolder extends TextureHolder {
     public addFRESTextures(device: GfxDevice, fres: FRES): void {
         const bntxFile = fres.externalFiles.find((f) => f.name === 'textures.bntx');
         if (bntxFile !== undefined)
@@ -41,19 +40,23 @@ export class BRTITextureHolder extends TextureHolder<BNTX.BRTI> {
 
     public addBNTXFile(device: GfxDevice, buffer: ArrayBufferSlice): void {
         const bntx = BNTX.parse(buffer);
-        this.addTextures(device, bntx.textures);
+        for (let i = 0; i < bntx.textures.length; i++)
+            this.addTexture(device, bntx.textures[i]);
     }
 
-    public loadTexture(device: GfxDevice, textureEntry: BNTX.BRTI): LoadedTexture | null {
-        const gfxTexture = device.createTexture(makeTextureDescriptor2D(translateImageFormat(textureEntry.imageFormat), textureEntry.width, textureEntry.height, textureEntry.mipBuffers.length));
-        const canvases: HTMLCanvasElement[] = [];
+    public addTexture(device: GfxDevice, textureEntry: BNTX.BRTI): void {
+        // Don't add duplicates.
+        if (this.textureNames.includes(textureEntry.name))
+            return;
+
+        const gfxTexture = device.createTexture(makeTextureDescriptor2D(translateImageFormat(textureEntry.imageFormat), textureEntry.width, textureEntry.height, textureEntry.textureDataArray[0].mipBuffers.length));
 
         const channelFormat = getChannelFormat(textureEntry.imageFormat);
 
-        for (let i = 0; i < textureEntry.mipBuffers.length; i++) {
+        for (let i = 0; i < textureEntry.textureDataArray[0].mipBuffers.length; i++) {
             const mipLevel = i;
 
-            const buffer = textureEntry.mipBuffers[i];
+            const buffer = textureEntry.textureDataArray[0].mipBuffers[i];
             const width = Math.max(textureEntry.width >>> mipLevel, 1);
             const height = Math.max(textureEntry.height >>> mipLevel, 1);
             const depth = 1;
@@ -62,18 +65,16 @@ export class BRTITextureHolder extends TextureHolder<BNTX.BRTI> {
                 const rgbaTexture = decompress({ ...textureEntry, width, height, depth }, deswizzled);
                 const rgbaPixels = rgbaTexture.pixels;
                 device.uploadTextureData(gfxTexture, mipLevel, [rgbaPixels]);
-
-                const canvas = document.createElement('canvas');
-                surfaceToCanvas(canvas, rgbaTexture);
-                canvases.push(canvas);
             });
         }
 
         const extraInfo = new Map<string, string>();
         extraInfo.set('Format', getImageFormatString(textureEntry.imageFormat));
 
-        const viewerTexture: Viewer.Texture = { name: textureEntry.name, surfaces: canvases, extraInfo };
-        return { viewerTexture, gfxTexture };
+        const viewerTexture: Viewer.Texture = { gfxTexture, extraInfo };
+        this.gfxTextures.push(gfxTexture);
+        this.viewerTextures.push(viewerTexture);
+        this.textureNames.push(textureEntry.name);
     }
 }
 
@@ -98,10 +99,9 @@ function translateMipFilterMode(filterMode: FilterMode): GfxMipFilterMode {
     switch (filterMode) {
     case FilterMode.Linear:
         return GfxMipFilterMode.Linear;
+    case 0:
     case FilterMode.Point:
         return GfxMipFilterMode.Nearest;
-    case 0:
-        return GfxMipFilterMode.NoMip;
     default:
         throw "whoops";
     }
@@ -120,7 +120,9 @@ function translateTexFilterMode(filterMode: FilterMode): GfxTexFilterMode {
 
 class TurboUBER extends DeviceProgram {
     public static a_Orders = [ '_p0', '_c0', '_u0', '_u1', '_u2', '_u3', '_n0', '_t0' ];
-    public static s_Orders = ['_a0', '_s0', '_n0', '_n1', '_e0', '_b0', '_b1', '_a1', '_a2', '_a3', '_t0' ];
+    public static a_Types = [ 'vec3', 'vec4', 'vec2', 'vec2', 'vec2', 'vec2', 'vec4', 'vec4' ];
+
+    public static s_Orders = ['_a0', '_s0', '_n0', '_n1', '_e0', '_b0', '_b1', '_a1', '_a2', '_a3', '_t0'];
 
     public static ub_SceneParams = 0;
     public static ub_MaterialParams = 1;
@@ -131,13 +133,13 @@ class TurboUBER extends DeviceProgram {
         super();
 
         this.name = this.fmat.name;
-        assert(this.fmat.samplerInfo.length <= 8);
+        // assert(this.fmat.samplerInfo.length <= 8);
 
         this.frag = this.generateFrag();
     }
 
     public static globalDefinitions = `
-precision mediump float;
+precision highp float;
 
 ${GfxShaderLibrary.MatrixLibrary}
 
@@ -200,23 +202,16 @@ uniform sampler2D u_TextureTransmission;  // _t0
     public override both = TurboUBER.globalDefinitions;
 
     public override vert = `
-layout(location = ${this.getAttrLocation('_p0')}) in vec3 a_p0; // _p0
-layout(location = ${this.getAttrLocation('_c0')}) in vec4 a_c0; // _c0
-layout(location = ${this.getAttrLocation('_u0')}) in vec2 a_u0; // _u0
-layout(location = ${this.getAttrLocation('_u1')}) in vec2 a_u1; // _u1
-layout(location = ${this.getAttrLocation('_u2')}) in vec2 a_u2; // _u2
-layout(location = ${this.getAttrLocation('_u3')}) in vec2 a_u3; // _u3
-layout(location = ${this.getAttrLocation('_n0')}) in vec4 a_n0; // _n0
-layout(location = ${this.getAttrLocation('_t0')}) in vec4 a_t0; // _t0
+${this.defineInputs()}
 
-#define a_Position  (a${this.getAttrAssign('_p0')})
-#define a_Color     (a${this.getAttrAssign('_c0')})
-#define a_TexCoord0 (a${this.getAttrAssign('_u0')})
-#define a_TexCoord1 (a${this.getAttrAssign('_u1')})
-#define a_TexCoord2 (a${this.getAttrAssign('_u2')})
-#define a_TexCoord3 (a${this.getAttrAssign('_u3')})
-#define a_Normal    (a${this.getAttrAssign('_n0')})
-#define a_Tangent   (a${this.getAttrAssign('_t0')})
+${this.defineAttr('a_Position', '_p0', 'vec3(0)')}
+${this.defineAttr('a_Color', '_c0', 'vec4(0)')}
+${this.defineAttr('a_TexCoord0', '_u0', 'vec2(0)')}
+${this.defineAttr('a_TexCoord1', '_u1', 'vec2(0)')}
+${this.defineAttr('a_TexCoord2', '_u2', 'vec2(0)')}
+${this.defineAttr('a_TexCoord3', '_u3', 'vec2(0)')}
+${this.defineAttr('a_Normal', '_n0', 'vec4(0)')}
+${this.defineAttr('a_Tangent', '_t0', 'vec4(0)')}
 
 out vec3 v_PositionWorld;
 out vec2 v_TexCoord0;
@@ -251,15 +246,29 @@ void main() {
 }
 `;
 
-    private getAttrAssign(attrName: string): string {
+    private defineInputs(): string {
         const attrAssign = this.fmat.shaderAssign.attrAssign;
-        return fallbackUndefined(attrAssign.get(attrName), attrName);
+        const uniqueAttrs = new Set(attrAssign.values());
+        let lines = '';
+        for (const attrName of uniqueAttrs) {
+            const index = TurboUBER.a_Orders.indexOf(attrName);
+            if (index < 0)
+                continue;
+            const type = TurboUBER.a_Types[index];
+            lines += `layout(location = ${index}) in ${type} a${attrName};\n`;
+        }
+
+        return lines;
     }
 
-    private getAttrLocation(attrName: string): number {
-        const index = TurboUBER.a_Orders.indexOf(attrName);
-        assert(index >= 0);
-        return index;
+    private defineAttr(varName: string, attrName: string, fallback: string): string {
+        const attrAssign = this.fmat.shaderAssign.attrAssign;
+        const remapAttr = attrAssign.get(attrName);
+        if (remapAttr !== undefined) {
+            return `#define ${varName} (a${remapAttr})`;
+        } else {
+            return `#define ${varName} (${fallback})`;
+        }
     }
 
     private isTranslucent(): boolean {
@@ -288,7 +297,7 @@ void main() {
 
     public generateFrag() {
         return `
-precision mediump float;
+precision highp float;
 
 ${GfxShaderLibrary.saturate}
 
@@ -921,7 +930,7 @@ function getRenderInfoBoolean(renderInfo: FMAT_RenderInfo): boolean {
         throw "whoops";
 }
 
-function translateCullMode(fmat: FMAT): GfxCullMode {
+function translateCullMode(fmat: FMAT): GfxCullMode | null {
     const display_face = getRenderInfoSingleString(fmat.renderInfo.get('gsys_render_state_display_face')!);
     if (display_face === 'front')
         return GfxCullMode.Back;
@@ -929,6 +938,8 @@ function translateCullMode(fmat: FMAT): GfxCullMode {
         return GfxCullMode.Front;
     else if (display_face === 'both')
         return GfxCullMode.None;
+    else if (display_face === 'none')
+        return null;
     else
         throw "whoops";
 }
@@ -1031,7 +1042,7 @@ function calcTexMtx_XSI(dst: mat4, scaleS: number, scaleT: number, rotation: num
     dst[13] = (scaleT * -cosR) - (scaleT * sinR * translationS) + (scaleT * cosR * translationT) + 1.0;
 }
 
-const enum TexSRTMode { Maya, Max, XSI }
+enum TexSRTMode { Maya, Max, XSI }
 class TexSRT {
     public mode = TexSRTMode.Maya;
     public scaleS = 1.0;
@@ -1072,6 +1083,7 @@ class FMATInstance {
 
     public inColorPass: boolean = false;
     public inShadowMap: boolean = false;
+    public visible = true;
 
     // Shader params, should maybe be generic?
     private texCoordSRT0 = new TexSRT();
@@ -1134,10 +1146,15 @@ class FMATInstance {
         this.gfxProgram = cache.createProgram(this.program);
 
         // Render flags.
+        let cullMode = translateCullMode(fmat);
+        if (cullMode === null) {
+            this.visible = false;
+            cullMode = GfxCullMode.Back;
+        }
         this.megaStateFlags = {
-            cullMode:       translateCullMode(fmat),
-            depthCompare:   reverseDepthForCompareMode(translateDepthCompare(fmat)),
-            depthWrite:     translateDepthWrite(fmat),
+            cullMode: cullMode,
+            depthCompare: reverseDepthForCompareMode(translateDepthCompare(fmat)),
+            depthWrite: translateDepthWrite(fmat),
         };
 
         const blendMode = getRenderInfoSingleString(fmat.renderInfo.get('gsys_render_state_blend_mode')!);
@@ -1304,75 +1321,108 @@ class FVTXData {
     public vertexBufferDescriptors: GfxVertexBufferDescriptor[] = [];
 
     constructor(device: GfxDevice, public fvtx: FVTX) {
-        let nextBufferIndex = fvtx.vertexBuffers.length;
+        let nextBufferIndex = 0;
 
-        for (let i = 0; i < fvtx.vertexAttributes.length; i++) {
-            const vertexAttribute = fvtx.vertexAttributes[i];
-            const bufferIndex = vertexAttribute.bufferIndex;
+        let zeroBufferIndex = -1;
+        const fvtxVertexBufferMap: number[] = [];
+        for (let i = 0; i < TurboUBER.a_Orders.length; i++) {
+            const attribName = TurboUBER.a_Orders[i];
+            const attribLocation = i;
 
-            if (this.inputBufferDescriptors[bufferIndex] === undefined)
-                this.inputBufferDescriptors[bufferIndex] = null;
+            const vertexAttribute = fvtx.vertexAttributes.find((attrib) => attrib.name === attribName);
+            if (vertexAttribute !== undefined) {
+                const fvtxBufferIndex = vertexAttribute.bufferIndex;
+                const vertexBuffer = fvtx.vertexBuffers[fvtxBufferIndex];
+                const convertedAttribute = this.convertVertexAttribute(device, vertexAttribute, vertexBuffer);
+                if (convertedAttribute !== null) {
+                    const attribBufferIndex = nextBufferIndex++;
 
-            const attribLocation = TurboUBER.a_Orders.indexOf(vertexAttribute.name);
-            if (attribLocation < 0)
-                continue;
+                    this.vertexAttributeDescriptors.push({
+                        location: attribLocation,
+                        format: convertedAttribute.format,
+                        bufferIndex: attribBufferIndex,
+                        // When we convert the buffer we remove the byte offset.
+                        bufferByteOffset: 0,
+                    });
 
-            const vertexBuffer = fvtx.vertexBuffers[bufferIndex];
-            const convertedAttribute = this.convertVertexAttribute(vertexAttribute, vertexBuffer);
-            if (convertedAttribute !== null) {
-                const attribBufferIndex = nextBufferIndex++;
-
-                this.vertexAttributeDescriptors.push({
-                    location: attribLocation,
-                    format: convertedAttribute.format,
-                    bufferIndex: attribBufferIndex,
-                    // When we convert the buffer we remove the byte offset.
-                    bufferByteOffset: 0,
-                });
-
-                this.inputBufferDescriptors[attribBufferIndex] = {
-                    byteStride: convertedAttribute.stride,
-                    frequency: GfxVertexBufferFrequency.PerVertex,
-                };
-
-                const gfxBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, convertedAttribute.data);
-                this.vertexBufferDescriptors[attribBufferIndex] = {
-                    buffer: gfxBuffer,
-                    byteOffset: 0,
-                };
-            } else {
-                // Can use buffer data directly.
-                this.vertexAttributeDescriptors.push({
-                    location: attribLocation,
-                    format: translateAttributeFormat(vertexAttribute.format),
-                    bufferIndex: bufferIndex,
-                    bufferByteOffset: vertexAttribute.offset,
-                });
-
-                if (!this.vertexBufferDescriptors[bufferIndex]) {
-                    const gfxBuffer = makeStaticDataBufferFromSlice(device, GfxBufferUsage.Vertex, vertexBuffer.data);
-
-                    this.inputBufferDescriptors[bufferIndex] = {
-                        byteStride: vertexBuffer.stride,
+                    this.inputBufferDescriptors[attribBufferIndex] = {
+                        byteStride: convertedAttribute.stride,
                         frequency: GfxVertexBufferFrequency.PerVertex,
                     };
 
-                    this.vertexBufferDescriptors[bufferIndex] = {
-                        buffer: gfxBuffer,
-                        byteOffset: 0,
-                    };
+                    const gfxBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, convertedAttribute.data);
+                    this.vertexBufferDescriptors[attribBufferIndex] = { buffer: gfxBuffer };
+                } else {
+                    let attribBufferIndex = fvtxVertexBufferMap[fvtxBufferIndex];
+                    if (attribBufferIndex === undefined) {
+                        attribBufferIndex = nextBufferIndex++;
+                        fvtxVertexBufferMap[fvtxBufferIndex] = attribBufferIndex;
+
+                        this.inputBufferDescriptors[attribBufferIndex] = {
+                            byteStride: vertexBuffer.stride,
+                            frequency: GfxVertexBufferFrequency.PerVertex,
+                        };
+
+                        const gfxBuffer = createBufferFromSlice(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, vertexBuffer.data);
+                        this.vertexBufferDescriptors[attribBufferIndex] = { buffer: gfxBuffer };
+                    }
+
+                    // Can use buffer data directly.
+                    this.vertexAttributeDescriptors.push({
+                        location: attribLocation,
+                        format: translateAttributeFormat(vertexAttribute.format),
+                        bufferIndex: attribBufferIndex,
+                        bufferByteOffset: vertexAttribute.offset,
+                    });
                 }
+            } else {
+                if (zeroBufferIndex < 0) {
+                    zeroBufferIndex = nextBufferIndex++;
+
+                    this.inputBufferDescriptors[zeroBufferIndex] = {
+                        byteStride: 0,
+                        frequency: GfxVertexBufferFrequency.Constant,
+                    };
+
+                    // TODO(jstpierre): Share zero buffers between FSHPData's.
+                    const gfxBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, new Uint8Array(32).buffer);
+                    this.vertexBufferDescriptors[zeroBufferIndex] = { buffer: gfxBuffer };
+                }
+
+                this.vertexAttributeDescriptors.push({
+                    location: attribLocation,
+                    format: GfxFormat.F32_RGBA,
+                    bufferIndex: zeroBufferIndex,
+                    bufferByteOffset: 0,
+                });
             }
         }
     }
 
-    public convertVertexAttribute(vertexAttribute: FVTX_VertexAttribute, vertexBuffer: FVTX_VertexBuffer): ConvertedVertexAttribute | null {
-        switch (vertexAttribute.format) {
-        case AttributeFormat._10_10_10_2_Snorm:
+    public convertVertexAttribute(device: GfxDevice, vertexAttribute: FVTX_VertexAttribute, vertexBuffer: FVTX_VertexBuffer): ConvertedVertexAttribute | null {
+        if (vertexAttribute.format === AttributeFormat._10_10_10_2_Snorm) {
             return this.convertVertexAttribute_10_10_10_2_Snorm(vertexAttribute, vertexBuffer);
-        default:
+        } else if (device.queryLimits().vertexBufferMinStride > 2 && (vertexAttribute.format === AttributeFormat._8_8_Snorm || vertexAttribute.format === AttributeFormat._8_8_Unorm)) {
+            return this.convertVertexAttribute_Expand(vertexAttribute, vertexBuffer, device.queryLimits().vertexBufferMinStride);
+        } else {
             return null;
         }
+    }
+
+    public convertVertexAttribute_Expand(vertexAttribute: FVTX_VertexAttribute, vertexBuffer: FVTX_VertexBuffer, dstStride: number): ConvertedVertexAttribute {
+        const numElements = vertexBuffer.data.byteLength / vertexBuffer.stride;
+        const dst = new Uint8Array(numElements * dstStride);
+        let dstOffs = 0;
+        let srcOffs = vertexAttribute.offset;
+        const src = vertexBuffer.data.createTypedArray(Uint8Array);
+        for (let i = 0; i < numElements; i++) {
+            for (let j = 0; j < vertexBuffer.stride; j++)
+                dst[dstOffs + j] = src[srcOffs++];
+            dstOffs += dstStride;
+        }
+
+        const format = translateAttributeFormat(vertexAttribute.format);
+        return { format, data: dst.buffer, stride: dstStride };
     }
 
     public convertVertexAttribute_10_10_10_2_Snorm(vertexAttribute: FVTX_VertexAttribute, vertexBuffer: FVTX_VertexBuffer): ConvertedVertexAttribute {
@@ -1421,7 +1471,7 @@ export class FSHPMeshData {
     public inputLayout: GfxInputLayout;
     public indexBuffer: GfxBuffer;
 
-    constructor(cache: GfxRenderCache, public mesh: FSHP_Mesh, fvtxData: FVTXData) {
+    constructor(cache: GfxRenderCache, public mesh: FSHP_Mesh, private fvtxData: FVTXData) {
         const indexBufferFormat = translateIndexFormat(mesh.indexFormat);
         this.inputLayout = cache.createInputLayout({
             indexBufferFormat,
@@ -1430,8 +1480,8 @@ export class FSHPMeshData {
         });
 
         this.vertexBufferDescriptors = fvtxData.vertexBufferDescriptors;
-        this.indexBuffer = makeStaticDataBufferFromSlice(cache.device, GfxBufferUsage.Index, mesh.indexBufferData);
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0 };
+        this.indexBuffer = createBufferFromSlice(cache.device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, mesh.indexBufferData);
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
     }
 
     public destroy(device: GfxDevice): void {
@@ -1504,7 +1554,7 @@ class FSHPInstance {
     }
 
     public prepareToRender(globals: TurboRenderGlobals, renderInstManager: GfxRenderInstManager, modelMatrix: ReadonlyMat4, viewerInput: Viewer.ViewerRenderInput): void {
-        if (!this.visible)
+        if (!this.visible || !this.fmatInstance.visible)
             return;
 
         if (!this.fmatInstance.inColorPass)
@@ -1729,7 +1779,7 @@ export class TurboRenderer {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListMain.reset();
     }
 

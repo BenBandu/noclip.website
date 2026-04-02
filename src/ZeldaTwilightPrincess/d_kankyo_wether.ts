@@ -1,5 +1,5 @@
 
-import { ReadonlyVec2, ReadonlyVec3, mat4, vec2, vec3, vec4 } from "gl-matrix";
+import { ReadonlyVec2, ReadonlyVec3, mat4, vec2, vec3 } from "gl-matrix";
 import ArrayBufferSlice from "../ArrayBufferSlice.js";
 import { Color, TransparentBlack, White, colorCopy, colorFromRGBA, colorFromRGBA8, colorLerp, colorNewCopy, colorNewFromRGBA8, colorScale } from "../Color.js";
 import { J3DModelInstance } from "../Common/JSYSTEM/J3D/J3DGraphBase.js";
@@ -9,32 +9,30 @@ import { BTIData, BTI_Texture } from "../Common/JSYSTEM/JUTTexture.js";
 import { MathConstants, computeMatrixWithoutTranslation, invlerp, saturate } from "../MathHelpers.js";
 import { DeviceProgram } from "../Program.js";
 import { TDDraw } from "../SuperMarioGalaxy/DDraw.js";
-import { TextureMapping } from "../TextureHolder.js";
-import { cLib_addCalc, cM_s2rad, cM_rndF, cM_rndFX } from "../ZeldaWindWaker/SComponent.js";
+import { cLib_addCalc, cM_rndF, cM_rndFX, cM_s2rad } from "../ZeldaWindWaker/SComponent.js";
 import { PeekZManager, PeekZResult } from "../ZeldaWindWaker/d_dlst_peekZ.js";
+import { cPhs__Status, fGlobals, fopKyM_Delete, fopKyM_create, fpcPf__Register, fpc_bs__Constructor, kankyo_class } from "../ZeldaWindWaker/framework.js";
 import { mDoLib_projectFB } from "../ZeldaWindWaker/m_do_ext.js";
 import { MtxTrans, calc_mtx, mDoMtx_XrotM, mDoMtx_ZrotM } from "../ZeldaWindWaker/m_do_mtx.js";
 import { fullscreenMegaState, setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
 import { GfxShaderLibrary } from "../gfx/helpers/GfxShaderLibrary.js";
 import { compareDepthValues, reverseDepthForClearValue } from "../gfx/helpers/ReversedDepthHelpers.js";
 import { fillColor, fillVec4 } from "../gfx/helpers/UniformBufferHelpers.js";
-import { GfxBindingLayoutDescriptor, GfxBlendFactor, GfxBlendMode, GfxClipSpaceNearZ, GfxCompareMode, GfxDevice, GfxFormat, GfxMipFilterMode, GfxTexFilterMode, GfxWrapMode } from "../gfx/platform/GfxPlatform.js";
-import { GfxProgram } from "../gfx/platform/GfxPlatformImpl.js";
+import { GfxBindingLayoutDescriptor, GfxBlendFactor, GfxBlendMode, GfxClipSpaceNearZ, GfxCompareMode, GfxDevice, GfxFormat, GfxMipFilterMode, GfxProgram, GfxTexFilterMode, GfxWrapMode } from "../gfx/platform/GfxPlatform.js";
 import { GfxrAttachmentSlot, GfxrGraphBuilder, GfxrRenderTargetDescription, GfxrRenderTargetID } from "../gfx/render/GfxRenderGraph.js";
 import { GfxRenderInst, GfxRenderInstManager } from "../gfx/render/GfxRenderInstManager.js";
 import { GXMaterialBuilder } from "../gx/GXMaterialBuilder.js";
 import * as GX from '../gx/gx_enum.js';
 import { GXShaderLibrary } from "../gx/gx_material.js";
-import { ColorKind, DrawParams, GXMaterialHelperGfx, MaterialParams } from "../gx/gx_render.js";
+import { ColorKind, DrawParams, GXMaterialHelperGfx, GXTextureMapping, MaterialParams } from "../gx/gx_render.js";
 import { assert, assertExists, nArray } from "../util.js";
 import { ViewerRenderInput } from "../viewer.js";
+import { dGlobals } from "./Main.js";
+import { dProcName_e } from "./d_a.js";
 import { dKy_actor_addcol_amb_set, dKy_addcol_fog_set, dKy_bg1_addcol_amb_set, dKy_bg_addcol_amb_set, dKy_darkworld_check, dKy_daynight_check, dKy_efplight_cut, dKy_efplight_set, dKy_get_dayofweek, dKy_set_actcol_ratio, dKy_set_bgcol_ratio, dKy_set_fogcol_ratio, dKy_set_vrboxcol_ratio, dKy_undwater_filter_draw, dKy_vrbox_addcol_kasumi_set, dKy_vrbox_addcol_sky0_set, dScnKy_env_light_c } from "./d_kankyo.js";
 import { ResType } from "./d_resorce.js";
 import { dStage_FileList_dt_c, dStage_stagInfo_GetArg0, dStage_stagInfo_GetSTType } from "./d_stage.js";
 import { mDoExt_brkAnm, mDoExt_modelUpdateDL } from "./m_do_ext.js";
-import { dGlobals } from "./Main.js";
-import { cPhs__Status, fGlobals, fopKyM_create, fopKyM_Delete, fpc_bs__Constructor, fpcPf__Register, kankyo_class } from "../ZeldaWindWaker/framework.js";
-import { dProcName_e } from "./d_a.js";
 
 export function dKyw_wether_init(globals: dGlobals): void {
     const envLight = globals.g_env_light;
@@ -140,14 +138,14 @@ export function dKyw_rain_set(envLight: dScnKy_env_light_c, count: number): void
     envLight.rainCountOrig = count;
 }
 
-export const enum ThunderMode {
+export enum ThunderMode {
     Off     = 0,
     On      = 1,
     Two     = 2,
     FarOnly = 10,
 }
 
-export const enum ThunderState {
+export enum ThunderState {
     Clear      = 0,
     FlashNear  = 1,
     FlashFar   = 11,
@@ -254,7 +252,7 @@ export function loadRawTexture(globals: dGlobals, data: ArrayBufferSlice, width:
         paletteData: null,
         paletteFormat: GX.TexPalette.IA8,
     };
-    const device = globals.modelCache.device, cache = globals.modelCache.cache;
+    const device = globals.modelCache.device, cache = globals.modelCache.renderCache;
     return new BTIData(device, cache, btiTexture);
 }
 
@@ -281,7 +279,7 @@ const scratchVec3e = vec3.create();
 
 export class dKankyo_sun_Packet {
     // Shared
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('dKankyo_sun_Packet');
 
     // Sun/Moon
     private moonTexture0: BTIData;
@@ -669,7 +667,7 @@ export class dKankyo_sun_Packet {
     }
 
     public draw(globals: dGlobals, renderInstManager: GfxRenderInstManager, viewerInput: ViewerRenderInput): void {
-        this.ddraw.beginDraw(globals.modelCache.cache);
+        this.ddraw.beginDraw(globals.modelCache.renderCache);
         this.ddraw.allocPrimitives(GX.Command.DRAW_TRIANGLES, 2048);
         this.drawLenzflare(globals, this.ddraw, renderInstManager, viewerInput);
         this.drawSunMoon(globals, this.ddraw, renderInstManager, viewerInput);
@@ -707,7 +705,7 @@ export class dKankyo_vrkumo_Packet {
     public strength: number = 0;
     public instances: VRKUMO_EFF[] = nArray(100, () => new VRKUMO_EFF());
     public bounceAnimTimer: number = 0;
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('dKankyo_vrkumo_Packet');
     private textures: BTIData[] = [];
     private materialHelper: GXMaterialHelperGfx;
     public cloudScrollX: number = 0;
@@ -755,7 +753,7 @@ export class dKankyo_vrkumo_Packet {
 
         renderInstManager.setCurrentList(globals.dlst.sky[1]);
 
-        ddraw.beginDraw(globals.modelCache.cache);
+        ddraw.beginDraw(globals.modelCache.renderCache);
         ddraw.allocPrimitives(GX.Command.DRAW_QUADS, 4*3*100);
 
         colorFromRGBA(materialParams.u_Color[ColorKind.C1], 0, 0, 0, 0);
@@ -951,7 +949,7 @@ export class dKankyo_housi_Packet {
     public count = 0;
     public rot = 0.0;
     
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('dKankyo_housi_Packet');
     private materialHelper: GXMaterialHelperGfx;
 
     private texData: BTIData;
@@ -990,7 +988,7 @@ export class dKankyo_housi_Packet {
 
         materialParams.clear();
 
-        ddraw.beginDraw(globals.modelCache.cache);
+        ddraw.beginDraw(globals.modelCache.renderCache);
         ddraw.begin(GX.Command.DRAW_QUADS, 4 * this.count);
 
         for (let i = 0; i < this.count; i++) {
@@ -1069,7 +1067,7 @@ class RAIN_EFF {
 
 export class dKankyo_rain_Packet {
     private ringTexture: BTIData;
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('dKankyo_rain_Packet');
     private materialHelperRain: GXMaterialHelperGfx;
     private materialHelperSibuki: GXMaterialHelperGfx;
     private sibukiAlpha: number = 0.0;
@@ -1267,7 +1265,7 @@ export class dKankyo_rain_Packet {
         if (envLight.rainCount === 0)
             return;
 
-        this.ddraw.beginDraw(globals.modelCache.cache);
+        this.ddraw.beginDraw(globals.modelCache.renderCache);
         this.drawRain(globals, renderInstManager, viewerInput);
         this.drawSibuki(globals, renderInstManager, viewerInput);
         this.ddraw.endDraw(renderInstManager);
@@ -1324,7 +1322,7 @@ export class dKankyo_star_Packet {
         colorNewFromRGBA8(0xFFFFFFC8),
     ];
 
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('dKankyo_star_Packet');
     private materialHelper: GXMaterialHelperGfx;
 
     public renderInMain = false;
@@ -1363,7 +1361,7 @@ export class dKankyo_star_Packet {
 
         materialParams.clear();
 
-        ddraw.beginDraw(globals.modelCache.cache);
+        ddraw.beginDraw(globals.modelCache.renderCache);
         ddraw.begin(GX.Command.DRAW_TRIANGLES, 6 * envLight.starCount);
 
         const star = this.instances[0];
@@ -1477,7 +1475,7 @@ export function dKyr_get_vectle_calc(p0: ReadonlyVec3, p1: ReadonlyVec3, dst: ve
     vec3.normalize(dst, dst);
 }
 
-const enum SunPeekZResult {
+enum SunPeekZResult {
     Visible, Obscured, Culled,
 }
 
@@ -2328,10 +2326,10 @@ export class mDoGph_bloom_c {
     private thresholdProgram: GfxProgram;
     private blurProgram: GfxProgram;
     private combineProgram: GfxProgram;
-    private textureMapping: TextureMapping[] = nArray(1, () => new TextureMapping());
+    private textureMapping: GXTextureMapping[] = nArray(1, () => new GXTextureMapping());
 
     constructor(globals: dGlobals) {
-        const cache = globals.modelCache.cache;
+        const cache = globals.modelCache.renderCache;
         const linearSampler = cache.createSampler({
             wrapS: GfxWrapMode.Clamp,
             wrapT: GfxWrapMode.Clamp,

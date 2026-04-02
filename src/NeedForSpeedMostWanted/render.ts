@@ -290,7 +290,7 @@ export class NfsRenderer implements SceneGfx {
 
         this.renderHelper.prepareToRender();
 
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListMain.reset();
 
         viewerInput.debugConsole.addInfoLine(`Region ID: ${this.activeRegion.id}`);
@@ -388,7 +388,7 @@ class NfsProgram extends DeviceProgram {
     public static ub_ObjectParams = 1;
 
     public override both = `
-precision mediump float;
+precision highp float;
 
 ${GfxShaderLibrary.MatrixLibrary}
 

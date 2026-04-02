@@ -7,7 +7,6 @@ import { GfxDevice, GfxFormat } from "../gfx/platform/GfxPlatform.js";
 import { LoadedVertexData, LoadedVertexLayout, VertexAttributeInput } from "../gx/gx_displaylist.js";
 import { calcEulerAngleRotationFromSRTMatrix, computeModelMatrixSRT, computeNormalMatrix, Mat4Identity } from "../MathHelpers.js";
 import { align, assertExists, fallback, nArray, nullify } from "../util.js";
-import * as Viewer from '../viewer.js';
 import { calcGravity, connectToScene, invalidateCollisionPartsForActor, isBckExist, isBckPlaying, isBpkExist, isBpkPlaying, isBrkExist, isBrkPlaying, isBtkExist, isBtkPlaying, isBtpExist, isBtpPlaying, isBvaExist, isBvaPlaying, resetAllCollisionMtx, startBck, startBpk, startBrk, startBtk, startBtp, startBva, validateCollisionPartsForActor } from "./ActorUtil.js";
 import { BckCtrl, BrkPlayer, BtkPlayer, BtpPlayer, BvaPlayer, XanimePlayer } from "./Animation.js";
 import { Binder, CollisionParts, CollisionScaleType, createCollisionPartsFromLiveActor, invalidateCollisionParts, setCollisionMtx } from "./Collision.js";
@@ -27,6 +26,8 @@ import { ANK1, BCK, BMD, BPK, BRK, BTK, BTP, BVA, ShapeMtxType, TexMtxMapMode, T
 import { MaterialParams, DrawParams } from "../gx/gx_render.js";
 import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
 import { JKRArchive, RARCFile } from "../Common/JSYSTEM/JKRArchive.js";
+import { GX_Program } from "../gx/gx_material.js";
+import * as Viewer from "../viewer.js";
 
 class ActorAnimDataInfo {
     public Name: string;
@@ -322,9 +323,9 @@ export class ResourceHolder {
         initEachResTable(this.arc, this.modelTable, ['.bdl', '.bmd'], (file, ext, filenameWithoutExtension) => {
             const bmd = BMD.parse(file.buffer);
             patchBMD(bmd);
-            const modelData = new J3DModelData(device, cache, bmd);
+            const modelData = new J3DModelData(device, cache, bmd, file.name);
             patchModelData(modelData);
-            this.addTEX1(modelData.modelMaterialData.tex1Data, objectName, filenameWithoutExtension);
+            this.addTEX1(device, modelData.modelMaterialData.tex1Data, objectName, filenameWithoutExtension);
             return modelData;
         });
 
@@ -346,7 +347,7 @@ export class ResourceHolder {
         initEachResTable(this.arc, this.banmtTable, ['.banmt'], (file) => BckCtrl.parse(file.buffer));
     }
 
-    private addTEX1(tex1Data: TEX1Data | null, objectName: string, filenameWithoutExtension: string): void {
+    private addTEX1(device: GfxDevice, tex1Data: TEX1Data | null, objectName: string, filenameWithoutExtension: string): void {
         if (tex1Data === null)
             return;
 
@@ -355,7 +356,8 @@ export class ResourceHolder {
             const texture = tex1Data.viewerTextures[i];
             if (texture === null)
                 continue;
-            texture.name = `${prefix}/${texture.name}`;
+
+            device.setResourceName(texture.gfxTexture, `${prefix}/${texture.gfxTexture.ResourceName}`);
             this.viewerTextures.push(texture);
         }
     }
@@ -382,6 +384,20 @@ export class ResourceHolder {
     }
 }
 
+export class NoSilhouettedProgram extends GX_Program {
+    public override generateExtraPixelGlobal(): string {
+        return `
+layout(location = 1) out vec4 o_OutColor1;
+`;
+    }
+
+    public override generateExtraPixelMain(): string {
+        return `
+o_OutColor1 = vec4(0.0);
+`;
+    }
+}
+
 export class ModelManager {
     public resourceHolder: ResourceHolder;
     public modelInstance: J3DModelInstance;
@@ -398,6 +414,8 @@ export class ModelManager {
 
         const bmdModel = this.resourceHolder.getModel(objName);
         this.modelInstance = new J3DModelInstance(bmdModel);
+        for (let i = 0; i < this.modelInstance.materialInstances.length; i++)
+            this.modelInstance.materialInstances[i].materialHelper.createProgram(NoSilhouettedProgram);
         this.modelInstance.name = objName;
         if (this.resourceHolder.motionTable.size > 0)
             this.xanimePlayer = new XanimePlayer(this.resourceHolder.motionTable, this.modelInstance);
@@ -598,7 +616,7 @@ export function resetPosition(sceneObjHolder: SceneObjHolder, actor: LiveActor):
     // requestCalcActorShadowAppear
 }
 
-export const enum LayerId {
+export enum LayerId {
     Common = -1,
     LayerA = 0,
     LayerB,
@@ -626,7 +644,7 @@ export interface ZoneAndLayer {
 
 export const dynamicSpawnZoneAndLayer: ZoneAndLayer = { zoneId: -1, layerId: LayerId.Common };
 
-export const enum MessageType {
+export enum MessageType {
     Player_Punch                             = 0x01,
     Player_Trample                           = 0x02,
     Player_HitDrop                           = 0x03,

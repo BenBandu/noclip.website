@@ -1,9 +1,8 @@
 
 import * as Ninja from "./Ninja.js";
-import { GfxDevice, GfxBuffer, GfxInputLayout, GfxFormat, GfxVertexBufferFrequency, GfxVertexAttributeDescriptor, GfxBufferUsage, GfxWrapMode, GfxTexFilterMode, GfxMipFilterMode, GfxCullMode, GfxCompareMode, GfxProgram, GfxMegaStateDescriptor, GfxBlendMode, GfxBlendFactor, GfxInputLayoutBufferDescriptor, GfxVertexBufferDescriptor, GfxIndexBufferDescriptor } from "../gfx/platform/GfxPlatform.js";
+import { GfxDevice, GfxBuffer, GfxInputLayout, GfxFormat, GfxVertexBufferFrequency, GfxVertexAttributeDescriptor, GfxBufferUsage, GfxWrapMode, GfxTexFilterMode, GfxMipFilterMode, GfxCullMode, GfxCompareMode, GfxProgram, GfxMegaStateDescriptor, GfxBlendMode, GfxBlendFactor, GfxInputLayoutBufferDescriptor, GfxVertexBufferDescriptor, GfxIndexBufferDescriptor, GfxBufferFrequencyHint } from "../gfx/platform/GfxPlatform.js";
 import { DeviceProgram } from "../Program.js";
 import * as Viewer from "../viewer.js";
-import { makeStaticDataBuffer } from "../gfx/helpers/BufferHelpers.js";
 import { mat4, ReadonlyMat4, ReadonlyVec3, vec3, vec4 } from "gl-matrix";
 import { fillMatrix4x3, fillMatrix4x2, fillColor } from "../gfx/helpers/UniformBufferHelpers.js";
 import { TextureMapping } from "../TextureHolder.js";
@@ -14,6 +13,7 @@ import { lerpAngle } from "../MathHelpers.js";
 import { PVRTextureHolder } from "./Scenes.js";
 import { assert, nArray } from "../util.js";
 import { GfxShaderLibrary } from "../gfx/helpers/GfxShaderLibrary.js";
+import { createBufferFromData } from "../gfx/helpers/BufferHelpers.js";
 
 export class JSRProgram extends DeviceProgram {
     public static a_Position = 0;
@@ -27,7 +27,7 @@ export class JSRProgram extends DeviceProgram {
     public static ub_ModelParams = 1;
 
     public override both = `
-precision mediump float;
+precision highp float;
 
 ${GfxShaderLibrary.MatrixLibrary}
 
@@ -135,61 +135,61 @@ export class NjsMeshData {
 
         if (vertexData.positions.length > 0) {
             const values = vertexData.positions.reduce((accumulator, currentValue) => accumulator.concat(...currentValue), [] as number[]);
-            const buffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, Float32Array.from(values).buffer);
+            const buffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, Float32Array.from(values).buffer);
             const bufferIndex = this.vertexBuffers.length;
 
             this.vertexBuffers.push(buffer);
             vertexAttributeDescriptors.push({ location: JSRProgram.a_Position, bufferIndex, bufferByteOffset: 0, format: GfxFormat.F32_RGB });
             vertexLayoutBufferDescriptors.push({ byteStride: 0x0C, frequency: GfxVertexBufferFrequency.PerVertex, });
-            this.vertexBufferDescriptors.push({ buffer, byteOffset: 0, });
+            this.vertexBufferDescriptors.push({ buffer });
         }
 
         if (vertexData.normals.length > 0) {
             const values = vertexData.normals.reduce((accumulator, currentValue) => accumulator.concat(...currentValue), [] as number[]);
-            const buffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, Float32Array.from(values).buffer);
+            const buffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, Float32Array.from(values).buffer);
             const bufferIndex = this.vertexBuffers.length;
 
             this.vertexBuffers.push(buffer);
             vertexAttributeDescriptors.push({ location: JSRProgram.a_Normal, bufferIndex, bufferByteOffset: 0, format: GfxFormat.F32_RGB });
             vertexLayoutBufferDescriptors.push({ byteStride: 0x0C, frequency: GfxVertexBufferFrequency.PerVertex, });
-            this.vertexBufferDescriptors.push({ buffer, byteOffset: 0, });
+            this.vertexBufferDescriptors.push({ buffer });
         }
 
         if (vertexData.uvs.length > 0) {
             const values = vertexData.uvs.reduce((accumulator, currentValue) => accumulator.concat(...currentValue), [] as number[]);
-            const buffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, Float32Array.from(values).buffer);
+            const buffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, Float32Array.from(values).buffer);
             const bufferIndex = this.vertexBuffers.length;
 
             this.vertexBuffers.push(buffer);
             vertexAttributeDescriptors.push({ location: JSRProgram.a_TexCoord, bufferIndex, bufferByteOffset: 0, format: GfxFormat.F32_RG });
             vertexLayoutBufferDescriptors.push({ byteStride: 0x08, frequency: GfxVertexBufferFrequency.PerVertex, });
-            this.vertexBufferDescriptors.push({ buffer, byteOffset: 0, });
+            this.vertexBufferDescriptors.push({ buffer });
         }
 
         if (vertexData.diffuse.length > 0) {
             const values = vertexData.diffuse.reduce((accumulator, currentValue) => accumulator.concat(currentValue.r, currentValue.g, currentValue.b, currentValue.a), [] as number[]);
-            const buffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, Float32Array.from(values).buffer);
+            const buffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, Float32Array.from(values).buffer);
             const bufferIndex = this.vertexBuffers.length;
 
             this.vertexBuffers.push(buffer);
             vertexAttributeDescriptors.push({ location: JSRProgram.a_Diffuse, bufferIndex, bufferByteOffset: 0, format: GfxFormat.F32_RGBA });
             vertexLayoutBufferDescriptors.push({ byteStride: 0x10, frequency: GfxVertexBufferFrequency.PerVertex, });
-            this.vertexBufferDescriptors.push({ buffer, byteOffset: 0, });
+            this.vertexBufferDescriptors.push({ buffer });
         }
 
         if (vertexData.specular.length > 0) {
             const values = vertexData.specular.reduce((accumulator, currentValue) => accumulator.concat(currentValue.r, currentValue.g, currentValue.b, currentValue.a), [] as number[]);
-            const buffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, Float32Array.from(values).buffer);
+            const buffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, Float32Array.from(values).buffer);
             const bufferIndex = this.vertexBuffers.length;
 
             this.vertexBuffers.push(buffer);
             vertexAttributeDescriptors.push({ location: JSRProgram.a_Specular, bufferIndex, bufferByteOffset: 0, format: GfxFormat.F32_RGBA });
             vertexLayoutBufferDescriptors.push({ byteStride: 0x10, frequency: GfxVertexBufferFrequency.PerVertex, });
-            this.vertexBufferDescriptors.push({ buffer, byteOffset: 0, });
+            this.vertexBufferDescriptors.push({ buffer });
         }
 
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, Uint16Array.from(indexData).buffer);
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0, };
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, Uint16Array.from(indexData).buffer);
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
 
         this.indexCount = indexData.length;
 
@@ -321,7 +321,6 @@ export class NjsMeshInstance {
             } else {
                 const textureId = texlist[texture.texture];
                 if (textureId === undefined || textureId === null) {
-                    //texname = '_yellow'; // 
                     texname = '_white'; // xayrga: needs to be white, the game makes use of untextured vertex objects. Plus the extractor tells us if we're missing anything.
                 } else {
                     texname = textureHolder.getTextureName(textureId);
@@ -560,7 +559,7 @@ function computeMatrix(out: mat4, a: ReadonlyMat4, s: ReadonlyVec3, r: ReadonlyV
     mat4.scale(out, out, s);
 }
 
-const enum EulerOrder {
+enum EulerOrder {
     XYZ,
     YXZ,
     ZXY,
@@ -578,7 +577,7 @@ const computeRotationOrderMap = [
     [mat4.rotateZ, mat4.rotateY, mat4.rotateX], // ZYX
 ]
 
-const enum Component {
+enum Component {
     X,
     Y,
     Z,

@@ -8,10 +8,9 @@ import * as UI from '../ui.js';
 
 import * as JPA from '../Common/JSYSTEM/JPA.js';
 import * as RARC from '../Common/JSYSTEM/JKRArchive.js';
-import { TextureMapping } from '../TextureHolder.js';
 import { readString, leftPad, assertExists, assert, nArray, hexzero } from '../util.js';
 import { GfxDevice, GfxRenderPass, GfxFormat } from '../gfx/platform/GfxPlatform.js';
-import { GXRenderHelperGfx, fillSceneParamsDataOnTemplate } from '../gx/gx_render.js';
+import { GXRenderHelperGfx, GXTextureMapping, fillSceneParamsDataOnTemplate } from '../gx/gx_render.js';
 import { setBackbufferDescSimple, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers.js';
 import { GfxRenderCache } from '../gfx/render/GfxRenderCache.js';
 import { SceneContext } from '../SceneBase.js';
@@ -25,7 +24,7 @@ import { dRes_control_c, ResType } from './d_resorce.js';
 import { dStage_stageDt_c, dStage_dt_c_stageLoader, dStage_dt_c_stageInitLoader, dStage_roomStatus_c, dStage_dt_c_roomLoader, dStage_dt_c_roomReLoader } from './d_stage.js';
 import { dScnKy_env_light_c, dKy_tevstr_init, dKy__RegisterConstructors, dKankyo_create, dKy_reinitLight } from './d_kankyo.js';
 import { dKyw__RegisterConstructors, mDoGph_bloom_c } from './d_kankyo_wether.js';
-import { d_a__RegisterConstructors, dDlst_2DStatic_c, dProcName_e } from './d_a.js';
+import { d_a__RegisterConstructors, dProcName_e } from './d_a.js';
 import { LegacyActor__RegisterFallbackConstructor } from './LegacyActor.js';
 import { dBgS } from '../ZeldaWindWaker/d_bg.js';
 import { TransparentBlack } from '../Color.js';
@@ -147,7 +146,6 @@ export class dGlobals {
     // TODO(jstpierre): Remove
     public renderer: TwilightPrincessRenderer;
 
-    public quadStatic: dDlst_2DStatic_c;
     public renderHacks = new RenderHacks();
 
     private relNameTable: { [id: number]: string };
@@ -229,7 +227,7 @@ export class TwilightPrincessRoom {
     }
 }
 
-const enum EffectDrawGroup {
+enum EffectDrawGroup {
     Main = 0,
     Indirect = 1,
 }
@@ -238,7 +236,7 @@ const scratchMatrix = mat4.create();
 export class TwilightPrincessRenderer implements Viewer.SceneGfx {
     private mainColorDesc = new GfxrRenderTargetDescription(GfxFormat.U8_RGBA_RT);
     private mainDepthDesc = new GfxrRenderTargetDescription(GfxFormat.D32F);
-    private opaqueSceneTextureMapping = new TextureMapping();
+    private opaqueSceneTextureMapping = new GXTextureMapping();
 
     private scenarioSelect: UI.SingleSelect | null = null;
     public currentLayer: number = -1;
@@ -252,6 +250,11 @@ export class TwilightPrincessRenderer implements Viewer.SceneGfx {
     public renderCache: GfxRenderCache;
 
     public time: number; // In milliseconds, affected by pause and time scaling
+
+    // Time of day control
+    private timeOfDayPanel: UI.TimeOfDayPanel | null = null;
+    private useSystemTime: boolean = true;
+    private readonly defaultTimeAdv: number = 0.012;
 
     public onstatechanged!: () => void;
 
@@ -388,7 +391,24 @@ export class TwilightPrincessRenderer implements Viewer.SceneGfx {
         };
         environmentPanel.contents.appendChild(this.bgAmbRatioSlider.elem);
 
-        return [roomsPanel, scenarioPanel, renderHacksPanel, environmentPanel];
+        // Time of Day panel
+        this.timeOfDayPanel = new UI.TimeOfDayPanel();
+        this.timeOfDayPanel.setTime(this.globals.g_env_light.curTime / 360);
+
+        this.timeOfDayPanel.onvaluechange = (t: number, useDynamicTime: boolean) => {
+            this.useSystemTime = useDynamicTime;
+            if (useDynamicTime) {
+                // Re-enable dynamic time: restore time advance rate and sync to current hour
+                this.globals.g_env_light.timeAdv = this.defaultTimeAdv;
+                this.globals.g_env_light.curTime = 15 * new Date().getHours();
+            } else {
+                // Freeze time at the selected value
+                this.globals.g_env_light.timeAdv = 0;
+                this.globals.g_env_light.curTime = t * 360;
+            }
+        };
+
+        return [roomsPanel, scenarioPanel, renderHacksPanel, environmentPanel, this.timeOfDayPanel];
     }
 
     // For people to play around with.
@@ -437,6 +457,11 @@ export class TwilightPrincessRenderer implements Viewer.SceneGfx {
 
         this.time = viewerInput.time;
         globals.counter += viewerInput.deltaTime / 30.0;
+
+        // Update time-of-day panel display
+        if (this.timeOfDayPanel !== null && this.useSystemTime) {
+            this.timeOfDayPanel.setTime(globals.g_env_light.curTime / 360);
+        }
 
         if (!this.cameraFrozen) {
             mat4.getTranslation(this.globals.cameraPosition, viewerInput.camera.worldMatrix);
@@ -497,6 +522,8 @@ export class TwilightPrincessRenderer implements Viewer.SceneGfx {
                 renderInstManager.setCurrentList(dlst.effect[group]);
                 this.globals.particleCtrl.draw(device, this.renderHelper.renderInstManager, group);
             }
+
+            globals.particleCtrl.prepareToRender(device);
 
             renderInstManager.setCurrentList(dlst.indirect[0]);
         }
@@ -571,7 +598,7 @@ export class TwilightPrincessRenderer implements Viewer.SceneGfx {
         this.renderHelper.renderInstManager.popTemplate();
 
         this.renderHelper.prepareToRender();
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
     }
 
     public destroy(device: GfxDevice) {
@@ -586,13 +613,13 @@ export class ModelCache {
     private fileDataCache = new Map<string, ArrayBufferSlice>();
     private archivePromiseCache = new Map<string, Promise<RARC.JKRArchive>>();
     private archiveCache = new Map<string, RARC.JKRArchive>();
-    public cache: GfxRenderCache;
+    public renderCache: GfxRenderCache;
 
     public resCtrl = new dRes_control_c();
     public currentStage: string;
 
     constructor(public device: GfxDevice, private dataFetcher: DataFetcher) {
-        this.cache = new GfxRenderCache(device);
+        this.renderCache = new GfxRenderCache(device);
     }
 
     public waitForLoad(): Promise<any> {
@@ -658,13 +685,13 @@ export class ModelCache {
 
     public async fetchObjectData(arcName: string): Promise<RARC.JKRArchive> {
         const archive = await this.fetchArchive(`res/Object/${arcName}.arc`);
-        this.resCtrl.mountRes(this.device, this.cache, arcName, archive, this.resCtrl.resObj);
+        this.resCtrl.mountRes(this.device, this.renderCache, arcName, archive, this.resCtrl.resObj);
         return archive;
     }
 
     public async fetchMsgData(arcName: string) {
         const archive = await this.fetchArchive(`res/Msg/${arcName}.arc`);
-        this.resCtrl.mountRes(this.device, this.cache, arcName, archive, this.resCtrl.resSystem);
+        this.resCtrl.mountRes(this.device, this.renderCache, arcName, archive, this.resCtrl.resSystem);
     }
 
     public requestFileData(path: string): cPhs__Status {
@@ -703,12 +730,12 @@ export class ModelCache {
 
     public async fetchStageData(arcName: string): Promise<RARC.JKRArchive> {
         const archive = await this.fetchArchive(`res/Stage/${this.currentStage}/${arcName}.arc`);
-        this.resCtrl.mountRes(this.device, this.cache, arcName, archive, this.resCtrl.resStg);
+        this.resCtrl.mountRes(this.device, this.renderCache, arcName, archive, this.resCtrl.resStg);
         return archive;
     }
 
     public destroy(device: GfxDevice): void {
-        this.cache.destroy();
+        this.renderCache.destroy();
         this.resCtrl.destroy(device);
     }
 }
@@ -750,10 +777,7 @@ class d_s_play extends fopScn {
 }
 
 class TwilightPrincessSceneDesc implements Viewer.SceneDesc {
-    public id: string;
-
-    constructor(public name: string, public stageDir: string, public rooms: number[] = [0]) {
-        this.id = this.stageDir;
+    constructor(public name: string, public stageDir: string, public rooms: number[] = [0], public id = stageDir) {
     }
 
     public async createScene(device: GfxDevice, context: SceneContext): Promise<Viewer.SceneGfx> {
@@ -820,9 +844,8 @@ class TwilightPrincessSceneDesc implements Viewer.SceneDesc {
         for (let i = 0; i < particleArchives.length; i++)
             modelCache.fetchFileData(particleArchives[i]);
 
-        // XXX(jstpierre): This is really terrible code.
         for (let i = 0; i < this.rooms.length; i++) {
-            const roomIdx = Math.abs(this.rooms[i]);
+            const roomIdx = this.rooms[i];
             modelCache.fetchStageData(`R${leftPad(''+roomIdx, 2)}_00`);
         }
 
@@ -873,7 +896,7 @@ class TwilightPrincessSceneDesc implements Viewer.SceneDesc {
 
         // If this is a single-room scene, then set mStayNo.
         if (this.rooms.length === 1)
-            globals.mStayNo = Math.abs(this.rooms[0]);
+            globals.mStayNo = this.rooms[0];
 
         const vrbox = resCtrl.getStageResByName(ResType.Model, `STG_00`, `vrbox_sora.bmd`);
         if (vrbox !== null) {
@@ -882,7 +905,7 @@ class TwilightPrincessSceneDesc implements Viewer.SceneDesc {
         }
 
         for (let i = 0; i < this.rooms.length; i++) {
-            const roomNo = Math.abs(this.rooms[i]);
+            const roomNo = this.rooms[i];
 
             const visible = this.rooms[i] >= 0;
             renderer.rooms.push(new TwilightPrincessRoom(roomNo, visible));
@@ -911,21 +934,21 @@ const sceneDescs = [
 
     "Ordon",
     new TwilightPrincessSceneDesc("Ordon Village", "F_SP103"),
-    new TwilightPrincessSceneDesc("Outside Link's House", "F_SP103", [1]),
+    new TwilightPrincessSceneDesc("Outside Link's House", "F_SP103", [1], "F_SP103_1"),
     new TwilightPrincessSceneDesc("Ordon Ranch", "F_SP00"),
     new TwilightPrincessSceneDesc("Ordon Spring", "F_SP104", [1]),
     new TwilightPrincessSceneDesc("Bo's House", "R_SP01", [0]),
-    new TwilightPrincessSceneDesc("Sera's Sundries", "R_SP01", [1]),
-    new TwilightPrincessSceneDesc("Jaggle's House", "R_SP01", [2]),
-    new TwilightPrincessSceneDesc("Link's House", "R_SP01", [4, 7]),
-    new TwilightPrincessSceneDesc("Rusl's House", "R_SP01", [5]),
+    new TwilightPrincessSceneDesc("Sera's Sundries", "R_SP01", [1], "R_SP01_1"),
+    new TwilightPrincessSceneDesc("Jaggle's House", "R_SP01", [2], "R_SP01_2"),
+    new TwilightPrincessSceneDesc("Link's House", "R_SP01", [4, 7], "R_SP01_4"),
+    new TwilightPrincessSceneDesc("Rusl's House", "R_SP01", [5], "R_SP01_5"),
 
     "Faron",
     new TwilightPrincessSceneDesc("South Faron Woods", "F_SP108", [0, 1, 2, 3, 4, 5, 8, 11, 14]),
-    new TwilightPrincessSceneDesc("North Faron Woods", "F_SP108", [6]),
+    new TwilightPrincessSceneDesc("North Faron Woods", "F_SP108", [6], "F_SP108"),
     new TwilightPrincessSceneDesc("Lost Woods", "F_SP117", [3]),
-    new TwilightPrincessSceneDesc("Sacred Grove", "F_SP117", [1]),
-    new TwilightPrincessSceneDesc("Temple of Time (Past)", "F_SP117", [2]),
+    new TwilightPrincessSceneDesc("Sacred Grove", "F_SP117", [1], "F_SP117_1"),
+    new TwilightPrincessSceneDesc("Temple of Time (Past)", "F_SP117", [2], "F_SP117_2"),
     new TwilightPrincessSceneDesc("Faron Woods Cave", "D_SB10"),
     new TwilightPrincessSceneDesc("Coro's House", "R_SP108"),
 
@@ -936,23 +959,23 @@ const sceneDescs = [
     new TwilightPrincessSceneDesc("Hidden Village", "F_SP128"),
     new TwilightPrincessSceneDesc("Renado's Sanctuary", "R_SP109", [0]),
     new TwilightPrincessSceneDesc("Sanctuary Basement", "R_SP209", [7]),
-    new TwilightPrincessSceneDesc("Barnes' Bombs", "R_SP109", [1]),
-    new TwilightPrincessSceneDesc("Elde Inn", "R_SP109", [2]),
-    new TwilightPrincessSceneDesc("Malo Mart", "R_SP109", [3]),
-    new TwilightPrincessSceneDesc("Lookout Tower", "R_SP109", [4]),
-    new TwilightPrincessSceneDesc("Bomb Warehouse", "R_SP109", [5]),
-    new TwilightPrincessSceneDesc("Abandoned House", "R_SP109", [6]),
+    new TwilightPrincessSceneDesc("Barnes' Bombs", "R_SP109", [1], "R_SP109_1"),
+    new TwilightPrincessSceneDesc("Elde Inn", "R_SP109", [2], "R_SP109_2"),
+    new TwilightPrincessSceneDesc("Malo Mart", "R_SP109", [3], "R_SP109_3"),
+    new TwilightPrincessSceneDesc("Lookout Tower", "R_SP109", [4], "R_SP109_4"),
+    new TwilightPrincessSceneDesc("Bomb Warehouse", "R_SP109", [5], "R_SP109_5"),
+    new TwilightPrincessSceneDesc("Abandoned House", "R_SP109", [6], "R_SP109_6"),
     new TwilightPrincessSceneDesc("Goron Elder's Hall", "R_SP110"),
 
     "Lanayru",
     new TwilightPrincessSceneDesc("Outside Castle Town - West", "F_SP122", [8]),
-    new TwilightPrincessSceneDesc("Outside Castle Town - South", "F_SP122", [16]),
-    new TwilightPrincessSceneDesc("Outside Castle Town - East", "F_SP122", [17]),
+    new TwilightPrincessSceneDesc("Outside Castle Town - South", "F_SP122", [16], "F_SP122_16"),
+    new TwilightPrincessSceneDesc("Outside Castle Town - East", "F_SP122", [17], "F_SP122_17"),
     new TwilightPrincessSceneDesc("Castle Town", "F_SP116", [0, 1, 2, 3, 4]),
     new TwilightPrincessSceneDesc("Zora's River", "F_SP112", [1]),
     new TwilightPrincessSceneDesc("Zora's Domain", "F_SP113", [0, 1]),
     new TwilightPrincessSceneDesc("Lake Hylia", "F_SP115"),
-    new TwilightPrincessSceneDesc("Lanayru Spring", "F_SP115", [1]),
+    new TwilightPrincessSceneDesc("Lanayru Spring", "F_SP115", [1], "F_SP115_1"),
     new TwilightPrincessSceneDesc("Upper Zora's River", "F_SP126", [0]),
     new TwilightPrincessSceneDesc("Fishing Pond", "F_SP127", [0]),
     new TwilightPrincessSceneDesc("Castle Town Sewers", "R_SP107", [0, 1, 2, 3]),
@@ -960,16 +983,16 @@ const sceneDescs = [
     new TwilightPrincessSceneDesc("Hena's Cabin", "R_SP127", [0]),
     new TwilightPrincessSceneDesc("Impaz's House", "R_SP128", [0]),
     new TwilightPrincessSceneDesc("Malo Mart", "R_SP160", [0]),
-    new TwilightPrincessSceneDesc("Fanadi's Palace", "R_SP160", [1]),
-    new TwilightPrincessSceneDesc("Medical Clinic", "R_SP160", [2]),
-    new TwilightPrincessSceneDesc("Agitha's Castle", "R_SP160", [3]),
-    new TwilightPrincessSceneDesc("Goron Shop", "R_SP160", [4]),
-    new TwilightPrincessSceneDesc("Jovani's House", "R_SP160", [5]),
+    new TwilightPrincessSceneDesc("Fanadi's Palace", "R_SP160", [1], "R_SP160_1"),
+    new TwilightPrincessSceneDesc("Medical Clinic", "R_SP160", [2], "R_SP160_2"),
+    new TwilightPrincessSceneDesc("Agitha's Castle", "R_SP160", [3], "R_SP160_3"),
+    new TwilightPrincessSceneDesc("Goron Shop", "R_SP160", [4], "R_SP160_4"),
+    new TwilightPrincessSceneDesc("Jovani's House", "R_SP160", [5], "R_SP160_5"),
     new TwilightPrincessSceneDesc("STAR Tent", "R_SP161", [7]),
 
     "Gerudo Desert",
     new TwilightPrincessSceneDesc("Bulblin Camp", "F_SP118", [0, 1, 3]),
-    new TwilightPrincessSceneDesc("Bulblin Camp Beta Room", "F_SP118", [2]),
+    new TwilightPrincessSceneDesc("Bulblin Camp Beta Room", "F_SP118", [2], "F_SP118_2"),
     new TwilightPrincessSceneDesc("Gerudo Desert", "F_SP124", [0]),
     new TwilightPrincessSceneDesc("Mirror Chamber", "F_SP125", [4]),
 

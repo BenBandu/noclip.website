@@ -43,7 +43,7 @@ export class RetroSceneRenderer implements Viewer.SceneGfx {
     private renderInstListMain = new GfxRenderInstList();
     public renderCache: GfxRenderCache;
     public modelCache = new ModelCache();
-    public textureHolder = new GXTextureHolder<TXTR>();
+    public textureHolder = new GXTextureHolder();
     public generatorMaterialHelpers = new GeneratorMaterialHelpers();
     public areaRenderers: MREARenderer[] = [];
     public defaultSkyRenderer: CMDLRenderer | null = null;
@@ -133,7 +133,7 @@ export class RetroSceneRenderer implements Viewer.SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListSky.reset();
         this.renderInstListMain.reset();
     }
@@ -277,7 +277,8 @@ export class RetroSceneRenderer implements Viewer.SceneGfx {
     }
 
     public addTextures(textures: TXTR[]): void {
-        this.textureHolder.addTextures(this.device, textures);
+        for (let i = 0; i < textures.length; i++)
+            this.textureHolder.addTexture(this.device, textures[i]);
     }
 
     public addMaterialSetTextures(materialSet: MaterialSet): void {

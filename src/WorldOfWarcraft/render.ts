@@ -1,7 +1,7 @@
-import { mat4, ReadonlyMat4, vec3 } from "gl-matrix";
+import { mat4 } from "gl-matrix";
+import { WowWmoGroupDescriptor } from "noclip-rust-support";
 import { invlerp, lerp } from "../MathHelpers.js";
 import { TextureMapping } from "../TextureHolder.js";
-import { makeStaticDataBuffer } from "../gfx/helpers/BufferHelpers.js";
 import { setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
 import {
     GfxTopology,
@@ -10,26 +10,29 @@ import {
 } from "../gfx/helpers/TopologyHelpers.js";
 import {
     fillMatrix4x3,
-    fillMatrix4x4,
     fillVec4,
-    fillVec4v,
+    fillVec4v
 } from "../gfx/helpers/UniformBufferHelpers.js";
 import {
     GfxBlendFactor,
     GfxBlendMode,
+    GfxBuffer,
+    GfxBufferFrequencyHint,
     GfxBufferUsage,
     GfxCullMode,
     GfxDevice,
     GfxIndexBufferDescriptor,
+    GfxInputLayout,
     GfxInputLayoutBufferDescriptor,
     GfxMegaStateDescriptor,
+    GfxTexture,
     GfxVertexAttributeDescriptor,
     GfxVertexBufferDescriptor,
     GfxVertexBufferFrequency,
     makeTextureDescriptor2D,
 } from "../gfx/platform/GfxPlatform.js";
 import { GfxFormat } from "../gfx/platform/GfxPlatformFormat.js";
-import { GfxBuffer, GfxInputLayout, GfxTexture } from "../gfx/platform/GfxPlatformImpl.js";
+import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
 import { GfxRenderHelper } from "../gfx/render/GfxRenderHelper.js";
 import {
     GfxRenderInstManager,
@@ -62,20 +65,17 @@ import {
 } from "./mesh.js";
 import {
     LoadingAdtProgram,
-    MAX_BONE_TRANSFORMS,
     MAX_DOODAD_INSTANCES,
     ModelProgram,
     ParticleProgram,
     SkyboxProgram,
     TerrainProgram,
     WaterProgram,
-    WmoProgram,
+    WmoProgram
 } from "./program.js";
-import { FrameData, MAP_SIZE, MapArray, View, WdtScene } from "./scenes.js";
+import { FrameData, MAP_SIZE, MapArray, View } from "./scenes.js";
 import { TextureCache } from "./tex.js";
-import { WowWmoGroupDescriptor } from "../../rust/pkg/noclip_support";
-import { drawWorldSpaceText, getDebugOverlayCanvas2D } from "../DebugJunk.js";
-import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
+import { createBufferFromData } from "../gfx/helpers/BufferHelpers";
 
 type TextureMappingArray = (TextureMapping | null)[];
 
@@ -150,23 +150,23 @@ export class ModelRenderer {
         this.boneTexture = new BoneTexture(device, this.model.boneData.length);
 
         this.vertexBuffer = {
-            buffer: makeStaticDataBuffer(
+            buffer: createBufferFromData(
                 device,
                 GfxBufferUsage.Vertex,
+                GfxBufferFrequencyHint.Static,
                 this.model.vertexBuffer.buffer,
             ),
-            byteOffset: 0,
         };
 
         for (let i in this.model.skins) {
             const skinData = this.model.skins[i];
             this.indexBuffers.push({
-                buffer: makeStaticDataBuffer(
+                buffer: createBufferFromData(
                     device,
                     GfxBufferUsage.Index,
+                    GfxBufferFrequencyHint.Static,
                     skinData.indexBuffer.buffer,
                 ),
-                byteOffset: 0,
             });
             this.skinData.push(skinData);
             this.skinBatchTextures[i] = [];
@@ -184,12 +184,12 @@ export class ModelRenderer {
         }
         const particleIndexBuf = makeTriangleIndexBuffer(GfxTopology.Quads, 0, maxParticles * 4);
         this.particleQuadIndices = {
-            buffer: makeStaticDataBuffer(
+            buffer: createBufferFromData(
                 device,
                 GfxBufferUsage.Index,
+                GfxBufferFrequencyHint.Static,
                 particleIndexBuf.buffer,
             ),
-            byteOffset: 0,
         };
         this.particleInputLayout = renderHelper.renderCache.createInputLayout({
             vertexAttributeDescriptors: [],
@@ -220,6 +220,9 @@ export class ModelRenderer {
             this.getTextureMapping(emitter.textures[0]),
             this.getTextureMapping(emitter.textures[1]),
             this.getTextureMapping(emitter.textures[2]),
+            null,
+            null,
+            null,
             dataMapping,
         ];
     }
@@ -242,6 +245,9 @@ export class ModelRenderer {
             this.getTextureMapping(batch.tex1),
             this.getTextureMapping(batch.tex2),
             this.getTextureMapping(batch.tex3),
+            null,
+            null,
+            null,
         ];
     }
 
@@ -313,7 +319,9 @@ export class ModelRenderer {
                 }
             }
             offs = baseOffs + lightSize * 4;
+            let skyboxBlend = 0;
             for (let doodad of doodadChunk) {
+                skyboxBlend = doodad.skyboxBlend;
                 offs += fillMatrix4x3(mapped, offs, doodad.modelMatrix);
                 offs += fillVec4v(mapped, offs, doodad.ambientColor); // interiorAmbientColor
                 if (doodad.color !== null) {
@@ -337,16 +345,17 @@ export class ModelRenderer {
                 const indexBuffer = this.indexBuffers[i];
                 for (let j = 0; j < skinData.batches.length; j++) {
                     const batch = skinData.batches[j];
+                    if (!batch.visible) continue;
                     if (batch.getTextureWeight(0) === 0) {
                         continue;
                     }
                     const renderInst = renderInstManager.newRenderInst();
                     renderInst.setVertexInput(this.inputLayout, [this.vertexBuffer], indexBuffer);
-                    batch.setMegaStateFlags(renderInst);
+                    batch.setMegaStateFlags(renderInst, this.model.isSkybox && skyboxBlend < 1.0);
                     renderInst.setDrawCount(batch.submesh.index_count, batch.submesh.index_start);
                     renderInst.setInstanceCount(doodadChunk.length);
                     const mappings = this.skinBatchTextures[i][j];
-                    mappings[4] = this.boneTexture.getTextureMapping();
+                    mappings[6] = this.boneTexture.getTextureMapping();
                     renderInst.setSamplerBindingsFromTextureMappings(mappings);
                     batch.setModelParams(renderInst);
                     renderInstManager.submitRenderInst(renderInst);
@@ -451,7 +460,7 @@ class BoneTexture {
     private texture: GfxTexture;
     private textureMapping = new TextureMapping();
 
-    constructor(device: GfxDevice, private maxBones: number) {
+    constructor(device: GfxDevice, maxBones: number) {
         this.texture = device.createTexture(makeTextureDescriptor2D(
             GfxFormat.F32_RGBA,
             BoneTexture.RGBA_WIDTH,
@@ -459,6 +468,7 @@ class BoneTexture {
             1,
         ));
         this.textureMapping.gfxTexture = this.texture;
+        device.setResourceName(this.texture, 'BoneTexture');
     }
 
     public uploadMatrices(device: GfxDevice, bones: BoneData[]) {
@@ -498,8 +508,10 @@ export class WmoRenderer {
 
     constructor(device: GfxDevice, private wmo: WmoData, private textureCache: TextureCache, renderHelper: GfxRenderHelper) {
         this.inputLayout = this.getInputLayout(renderHelper.renderCache);
-        this.gfxVertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, this.wmo.vertexBuffer.buffer);
-        this.gfxIndexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, this.wmo.indexBuffer.buffer);
+        this.gfxVertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, this.wmo.vertexBuffer.buffer);
+        this.gfxIndexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, this.wmo.indexBuffer.buffer);
+        device.setResourceName(this.gfxVertexBuffer, `WMO ${this.wmo.fileId}`);
+        device.setResourceName(this.gfxIndexBuffer, `WMO ${this.wmo.fileId} (IB)`);
 
         for (let fileID of this.wmo.wmo.group_file_ids) {
             const groupDescriptor = this.wmo.wmo.get_group_descriptor(fileID);
@@ -795,7 +807,7 @@ export class TerrainRenderer {
             indexBufferFormat,
         });
         [this.vertexBuffer, this.indexBuffer] =
-            this.adt.getBufsAndChunks(device);
+            this.adt.getBuffers(device);
         for (let i in this.adt.chunkData) {
             const chunk = this.adt.chunkData[i];
             this.chunkTextureMappings[i] = this.getChunkTextureMapping(chunk);
@@ -857,6 +869,11 @@ export class TerrainRenderer {
             [this.vertexBuffer],
             this.indexBuffer,
         );
+
+        let offs = template.allocateUniformBuffer(TerrainProgram.ub_TerrainParams, 4);
+        const d = template.mapUniformBufferF32(TerrainProgram.ub_TerrainParams);
+        offs += fillVec4(d, offs, this.adt.hasBigAlpha ? 1.0 : 0.0);
+
         for (let i of indices) {
             const chunk = this.adt.chunkData[i];
             if (chunk.indexCount === 0) continue;
@@ -913,19 +930,19 @@ export class LoadingAdtRenderer {
         });
 
         this.vertexBuffer = {
-            byteOffset: 0,
-            buffer: makeStaticDataBuffer(
+            buffer: createBufferFromData(
                 device,
                 GfxBufferUsage.Vertex,
+                GfxBufferFrequencyHint.Static,
                 loadingAdtVertices.buffer,
             ),
         };
         this.numIndices = loadingAdtIndices.length;
         this.indexBuffer = {
-            byteOffset: 0,
-            buffer: makeStaticDataBuffer(
+            buffer: createBufferFromData(
                 device,
                 GfxBufferUsage.Index,
+                GfxBufferFrequencyHint.Static,
                 loadingAdtIndices.buffer,
             ),
         };
@@ -969,7 +986,6 @@ export class LoadingAdtRenderer {
                 [this.vertexBuffer],
                 this.indexBuffer,
             );
-            renderInst.setBindingLayouts(LoadingAdtProgram.bindingLayouts);
             renderInst.setDrawCount(this.numIndices, 0);
             renderInstManager.submitRenderInst(renderInst);
         }
@@ -1190,23 +1206,25 @@ export class SkyboxRenderer {
         });
 
         this.vertexBuffer = {
-            byteOffset: 0,
-            buffer: makeStaticDataBuffer(
+            buffer: createBufferFromData(
                 device,
                 GfxBufferUsage.Vertex,
+                GfxBufferFrequencyHint.Static,
                 skyboxVertices.buffer,
             ),
         };
+        device.setResourceName(this.vertexBuffer.buffer, 'Skybox');
         const convertedIndices = convertToTriangleIndexBuffer(GfxTopology.TriStrips, skyboxIndices);
         this.numIndices = convertedIndices.length;
         this.indexBuffer = {
-            byteOffset: 0,
-            buffer: makeStaticDataBuffer(
+            buffer: createBufferFromData(
                 device,
                 GfxBufferUsage.Index,
+                GfxBufferFrequencyHint.Static,
                 convertedIndices.buffer,
             ),
         };
+        device.setResourceName(this.indexBuffer.buffer, 'Skybox (IB)');
     }
 
     public prepareToRenderSkybox(renderInstManager: GfxRenderInstManager) {
@@ -1217,7 +1235,6 @@ export class SkyboxRenderer {
             this.indexBuffer,
         );
         renderInst.setMegaStateFlags({ depthWrite: false });
-        renderInst.setBindingLayouts(SkyboxProgram.bindingLayouts);
         renderInst.setDrawCount(this.numIndices, 0);
         renderInstManager.submitRenderInst(renderInst);
     }

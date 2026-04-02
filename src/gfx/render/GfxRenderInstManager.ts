@@ -6,8 +6,8 @@ import { GfxMegaStateDescriptor, GfxDevice, GfxRenderPass, GfxRenderPipelineDesc
 
 import { defaultMegaState, copyMegaState, setMegaStateFlags } from "../helpers/GfxMegaStateDescriptorHelpers.js";
 
-import { GfxRenderCache } from "./GfxRenderCache.js";
-import { GfxRenderDynamicUniformBuffer } from "./GfxRenderDynamicUniformBuffer.js";
+import type { GfxRenderCache } from "./GfxRenderCache.js";
+import type { GfxRenderDynamicUniformBuffer } from "./GfxRenderDynamicUniformBuffer.js";
 
 /**
  * The "Render" subsystem provides high-level scene graph utiltiies, built on top of gfx/platform and gfx/helpers. A
@@ -54,7 +54,7 @@ import { GfxRenderDynamicUniformBuffer } from "./GfxRenderDynamicUniformBuffer.j
 // bitflag. It's special as it changes the behavior of the generic sort key functions like makeSortKey and
 // setSortKeyDepth.
 
-export const enum GfxRendererLayer {
+export enum GfxRendererLayer {
     BACKGROUND  = 0x00,
     ALPHA_TEST  = 0x10,
     OPAQUE      = 0x20,
@@ -166,7 +166,7 @@ export class GfxRenderInst {
     private _drawInstanceCount: number = 1;
 
     private _stencilRef: number | null = null;
-    private _blendColor: GfxColor | null = null;
+    private _blendColor: Readonly<GfxColor> | null = null;
 
     constructor() {
         this._renderPipelineDescriptor = {
@@ -185,7 +185,7 @@ export class GfxRenderInst {
      * Copies the fields from another render inst {@param o} to this render inst.
      */
     public copyFrom(o: GfxRenderInst): void {
-        setMegaStateFlags(this._renderPipelineDescriptor.megaStateDescriptor, o._renderPipelineDescriptor.megaStateDescriptor);
+        this._renderPipelineDescriptor.megaStateDescriptor = copyMegaState(o._renderPipelineDescriptor.megaStateDescriptor);
         this._renderPipelineDescriptor.program = o._renderPipelineDescriptor.program;
         this._renderPipelineDescriptor.inputLayout = o._renderPipelineDescriptor.inputLayout;
         this._renderPipelineDescriptor.topology = o._renderPipelineDescriptor.topology;
@@ -201,13 +201,15 @@ export class GfxRenderInst {
         this._vertexBuffers = o._vertexBuffers;
         this._indexBuffer = o._indexBuffer;
         this._allowSkippingPipelineIfNotReady = o._allowSkippingPipelineIfNotReady;
+        this._stencilRef = o._stencilRef;
+        this._blendColor = o._blendColor;
         this.sortKey = o.sortKey;
         for (let i = 0; i < o._bindingDescriptors.length; i++) {
             const tbd = this._bindingDescriptors[i], obd = o._bindingDescriptors[i];
             if (obd.bindingLayout !== null)
                 this._setBindingLayout(i, obd.bindingLayout);
             for (let j = 0; j < Math.min(tbd.uniformBufferBindings.length, obd.uniformBufferBindings.length); j++)
-                tbd.uniformBufferBindings[j].wordCount = obd.uniformBufferBindings[j].wordCount;
+                tbd.uniformBufferBindings[j].byteSize = obd.uniformBufferBindings[j].byteSize;
             this.setSamplerBindingsFromTextureMappings(obd.samplerBindings);
         }
         for (let i = 0; i < o._dynamicUniformBufferByteOffsets.length; i++)
@@ -215,13 +217,6 @@ export class GfxRenderInst {
     }
 
     public validate(): void {
-        // Validate uniform buffer bindings.
-        for (let i = 0; i < this._bindingDescriptors.length; i++) {
-            const bd = this._bindingDescriptors[i];
-            for (let j = 0; j < bd.bindingLayout.numUniformBuffers; j++)
-                assert(bd.uniformBufferBindings[j].wordCount > 0);
-        }
-
         assert(this._drawCount > 0);
     }
 
@@ -274,9 +269,9 @@ export class GfxRenderInst {
         bindingDescriptor.bindingLayout = bindingLayout;
 
         for (let j = bindingDescriptor.uniformBufferBindings.length; j < bindingLayout.numUniformBuffers; j++)
-            bindingDescriptor.uniformBufferBindings.push({ buffer: null!, wordCount: 0 });
+            bindingDescriptor.uniformBufferBindings.push({ buffer: null!, byteSize: 0 });
         for (let j = bindingDescriptor.samplerBindings.length; j < bindingLayout.numSamplers; j++)
-            bindingDescriptor.samplerBindings.push({ gfxSampler: null, gfxTexture: null, lateBinding: null });
+            bindingDescriptor.samplerBindings.push({ gfxSampler: null, gfxTexture: null, lateBinding: undefined });
     }
 
     /**
@@ -328,11 +323,12 @@ export class GfxRenderInst {
     public allocateUniformBuffer(bufferIndex: number, wordCount: number): number {
         assert(this._bindingDescriptors[0].bindingLayout.numUniformBuffers <= this._dynamicUniformBufferByteOffsets.length);
         assert(bufferIndex < this._bindingDescriptors[0].bindingLayout.numUniformBuffers);
-        this._dynamicUniformBufferByteOffsets[bufferIndex] = this._uniformBuffer.allocateChunk(wordCount) << 2;
+        const wordOffset = this._uniformBuffer.allocateChunk(wordCount);
+        this._dynamicUniformBufferByteOffsets[bufferIndex] = wordOffset << 2;
 
         const dst = this._bindingDescriptors[0].uniformBufferBindings[bufferIndex];
-        dst.wordCount = wordCount;
-        return this._dynamicUniformBufferByteOffsets[bufferIndex] >>> 2;
+        dst.byteSize = wordCount << 2;
+        return wordOffset;
     }
 
     /**
@@ -353,7 +349,7 @@ export class GfxRenderInst {
         this._dynamicUniformBufferByteOffsets[bufferIndex] = wordOffset << 2;
 
         const dst = this._bindingDescriptors[0].uniformBufferBindings[bufferIndex];
-        dst.wordCount = wordCount;
+        dst.byteSize = wordCount << 2;
     }
 
     /**
@@ -383,7 +379,7 @@ export class GfxRenderInst {
             if (binding === undefined || binding === null) {
                 dst.gfxTexture = null;
                 dst.gfxSampler = null;
-                dst.lateBinding = null;
+                dst.lateBinding = undefined;
                 continue;
             }
 
@@ -436,13 +432,13 @@ export class GfxRenderInst {
                         dst.gfxTexture = null;
                         dst.gfxSampler = null;
                     } else {
-                        assert(binding.lateBinding === null);
+                        assert(binding.lateBinding === undefined);
                         dst.gfxTexture = binding.gfxTexture;
                         if (binding.gfxSampler !== null)
                             dst.gfxSampler = binding.gfxSampler;
                     }
     
-                    dst.lateBinding = null;
+                    dst.lateBinding = undefined;
                 }
             }
         }
@@ -492,7 +488,7 @@ export class GfxRenderInst {
         this._stencilRef = value;
     }
 
-    public setBlendColor(value: GfxColor | null): void {
+    public setBlendColor(value: Readonly<GfxColor> | null): void {
         this._blendColor = value;
     }
 
@@ -511,7 +507,7 @@ export class GfxRenderInst {
         }
 
         if (this.debugMarker !== null)
-            passRenderer.beginDebugGroup(this.debugMarker);
+            passRenderer.insertDebugMarker(this.debugMarker);
 
         passRenderer.setPipeline(gfxPipeline);
         passRenderer.setVertexInput(this._renderPipelineDescriptor.inputLayout, this._vertexBuffers, this._indexBuffer);
@@ -541,9 +537,6 @@ export class GfxRenderInst {
         } else {
             passRenderer.draw(this._drawCount, this._drawStart);
         }
-
-        if (this.debugMarker !== null)
-            passRenderer.endDebugGroup();
     }
 }
 //#endregion
@@ -555,7 +548,7 @@ export function gfxRenderInstCompareSortKey(a: GfxRenderInst, b: GfxRenderInst):
     return a.sortKey - b.sortKey;
 }
 
-export const enum GfxRenderInstExecutionOrder {
+export enum GfxRenderInstExecutionOrder {
     Forwards,
     Backwards,
 }

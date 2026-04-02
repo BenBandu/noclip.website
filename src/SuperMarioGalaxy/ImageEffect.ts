@@ -10,7 +10,6 @@ import { GfxRenderInst, GfxRenderInstManager } from "../gfx/render/GfxRenderInst
 import { GXShaderLibrary } from "../gx/gx_material.js";
 import { getMatrixTranslation } from "../MathHelpers.js";
 import { DeviceProgram } from "../Program.js";
-import { TextureMapping } from "../TextureHolder.js";
 import { assert, fallback, nArray } from "../util.js";
 import { connectToScene, getAreaObj } from "./ActorUtil.js";
 import { AreaFormType, AreaObj, AreaObjMgr } from "./AreaObj.js";
@@ -18,6 +17,7 @@ import { JMapInfoIter, getJMapInfoArg0, getJMapInfoArg1, getJMapInfoArg2, getJMa
 import { ZoneAndLayer } from "./LiveActor.js";
 import { SceneObj, SceneObjHolder } from "./Main.js";
 import { CalcAnimType, MovementType, NameObj } from "./NameObj.js";
+import { GXTextureMapping } from "../gx/gx_render.js";
 
 const scratchVec3 = vec3.create();
 
@@ -93,7 +93,7 @@ function connectToSceneImageEffect(sceneObjHolder: SceneObjHolder, nameObj: Name
 const bindingLayouts: GfxBindingLayoutDescriptor[] = [
     { numUniformBuffers: 1, numSamplers: 2, samplerEntries: [
         { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },
-        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Depth, },
+        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.UnfilterableFloat, },
     ] },
 ];
 
@@ -213,7 +213,7 @@ export class BloomEffect extends ImageEffectBase {
         blendDstFactor: GfxBlendFactor.One,
     }), fullscreenMegaState);
 
-    private textureMapping: TextureMapping[] = nArray(1, () => new TextureMapping());
+    private textureMapping: GXTextureMapping[] = nArray(1, () => new GXTextureMapping());
 
     private target2ColorDesc = new GfxrRenderTargetDescription(GfxFormat.U8_RGBA_RT);
     private target4ColorDesc = new GfxrRenderTargetDescription(GfxFormat.U8_RGBA_RT);
@@ -225,7 +225,7 @@ export class BloomEffect extends ImageEffectBase {
         connectToSceneNormalBloom(sceneObjHolder, this);
         sceneObjHolder.create(SceneObj.ImageEffectSystemHolder);
 
-        const cache = sceneObjHolder.modelCache.cache;
+        const cache = sceneObjHolder.modelCache.renderCache;
         const linearSampler = cache.createSampler({
             wrapS: GfxWrapMode.Clamp,
             wrapT: GfxWrapMode.Clamp,
@@ -277,6 +277,8 @@ export class BloomEffect extends ImageEffectBase {
         renderInst.setBindingLayouts(bindingLayouts);
         this.allocateParameterBuffer(renderInst);
         renderInst.setDrawCount(3);
+
+        builder.pushDebugGroup('Bloom');
 
         // Downsample and threshold.
         builder.pushPass((pass) => {
@@ -379,6 +381,8 @@ export class BloomEffect extends ImageEffectBase {
                 renderInst.drawOnPass(renderInstManager.gfxRenderCache, passRenderer);
             });
         });
+
+        builder.popDebugGroup();
     }
 }
 
@@ -461,7 +465,7 @@ export class BloomEffectSimple extends ImageEffectBase {
         blendDstFactor: GfxBlendFactor.One,
     }), fullscreenMegaState);
 
-    private textureMapping: TextureMapping[] = nArray(1, () => new TextureMapping());
+    private textureMapping: GXTextureMapping[] = nArray(1, () => new GXTextureMapping());
 
     private targetColorDesc = new GfxrRenderTargetDescription(GfxFormat.U8_RGBA_RT);
 
@@ -471,7 +475,7 @@ export class BloomEffectSimple extends ImageEffectBase {
         connectToSceneImageEffect(sceneObjHolder, this);
         sceneObjHolder.create(SceneObj.ImageEffectSystemHolder);
 
-        const device = sceneObjHolder.modelCache.device, cache = sceneObjHolder.modelCache.cache;
+        const device = sceneObjHolder.modelCache.device, cache = sceneObjHolder.modelCache.renderCache;
         const linearSampler = cache.createSampler({
             wrapS: GfxWrapMode.Clamp,
             wrapT: GfxWrapMode.Clamp,
@@ -516,6 +520,8 @@ export class BloomEffectSimple extends ImageEffectBase {
         renderInst.setDrawCount(3);
 
         // Downsample and threshold.
+        builder.pushDebugGroup('Bloom Simple');
+
         builder.pushPass((pass) => {
             pass.setDebugName('Bloom Simple Downsample');
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, downsampleColorTargetID);
@@ -548,6 +554,8 @@ export class BloomEffectSimple extends ImageEffectBase {
                 renderInst.drawOnPass(renderInstManager.gfxRenderCache, passRenderer);
             });
         });
+
+        builder.popDebugGroup();
     }
 }
 
@@ -609,7 +617,7 @@ export class DepthOfFieldBlur extends ImageEffectBase {
     public blurMaxDist: number | null = null;
     public blurMinDist: number | null = null;
 
-    private textureMapping: TextureMapping[] = nArray(2, () => new TextureMapping());
+    private textureMapping: GXTextureMapping[] = nArray(2, () => new GXTextureMapping());
 
     private combineMegaState: GfxMegaStateDescriptor = makeMegaState(setAttachmentStateSimple({}, {
         blendMode: GfxBlendMode.Add,
@@ -626,7 +634,7 @@ export class DepthOfFieldBlur extends ImageEffectBase {
         connectToSceneImageEffect(sceneObjHolder, this);
         sceneObjHolder.create(SceneObj.ImageEffectSystemHolder);
 
-        const cache = sceneObjHolder.modelCache.cache;
+        const cache = sceneObjHolder.modelCache.renderCache;
         const linearSampler = cache.createSampler({
             wrapS: GfxWrapMode.Clamp,
             wrapT: GfxWrapMode.Clamp,
@@ -678,6 +686,8 @@ export class DepthOfFieldBlur extends ImageEffectBase {
         let targetDesc = builder.getRenderTargetDescription(mainColorTargetID);
         let downsampleColorTargetID: GfxrRenderTargetID;
 
+        builder.pushDebugGroup('Depth of Field');
+
         for (let i = 0; i < 2; i++) {
             const targetWidth = targetDesc.width >> 1;
             const targetHeight = targetDesc.height >> 1;
@@ -727,6 +737,8 @@ export class DepthOfFieldBlur extends ImageEffectBase {
                 renderInst.drawOnPass(renderInstManager.gfxRenderCache, passRenderer);
             });
         });
+
+        builder.popDebugGroup();
     }
 }
 
@@ -1021,7 +1033,7 @@ export class ImageEffectSystemHolder extends NameObj {
     }
 }
 
-const enum ImageEffectType {
+enum ImageEffectType {
     BloomNormal,
     BloomSimple,
     ScreenBlur,

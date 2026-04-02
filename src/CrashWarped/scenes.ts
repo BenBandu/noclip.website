@@ -9,7 +9,6 @@ import { GfxrAttachmentSlot } from "../gfx/render/GfxRenderGraph.js";
 import { fillMatrix4x4, fillVec3v } from "../gfx/helpers/UniformBufferHelpers.js";
 import { mat4, vec3 } from "gl-matrix";
 import { drawWorldSpaceLine, drawWorldSpacePoint, drawWorldSpaceText, getDebugOverlayCanvas2D } from "../DebugJunk.js";
-import { Blue, Color, Cyan, Green, Magenta, OpaqueBlack, Red, Yellow } from "../Color.js";
 import { CameraController } from "../Camera.js";
 
 import * as BIN from "./bin.js";
@@ -18,18 +17,10 @@ import { TextureData, ModelData, AnyGFXData, QuadListData, renderWorldMesh, Text
 import * as UI from "../ui.js";
 import { getMatrixAxisX, getMatrixAxisZ, Mat4Identity } from "../MathHelpers.js";
 import { IS_DEVELOPMENT } from "../BuildVersion.js";
+import { Green } from "../Color.js";
 const pathBase = `CrashWarped`;
 
 const bindingLayouts: GfxBindingLayoutDescriptor[] = [{ numUniformBuffers: 3, numSamplers: 2 }];
-
-const myColors: Color[] = [
-    Magenta,
-    Yellow,
-    Cyan,
-    Green,
-    OpaqueBlack,
-    Blue,
-];
 
 interface BasicMesh {
     data: ModelData;
@@ -47,7 +38,6 @@ class WarpedRenderer implements SceneGfx {
     public modelData: AnyGFXData[] = [];
     public worldParts: BasicMesh[] = [];
     public pointClouds: Map<string, BIN.WGEO>;
-    private lightDirection = mat4.create();
     public currPts = "";
     public data: BIN.LevelData;
     public waterMesh: WaterMeshData | null = null;
@@ -119,9 +109,8 @@ class WarpedRenderer implements SceneGfx {
         });
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
-
         this.prepareToRender(device, viewerInput);
-        this.globals.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.globals.renderInstListMain.reset();
         this.globals.renderInstListSkybox.reset();
 
@@ -220,6 +209,10 @@ class WarpedRenderer implements SceneGfx {
             this.modelData[i].destroy(device);
         for (let i = 0; i < this.textureData.length; i++)
             this.textureData[i].destroy(device);
+        if (this.waterMesh !== null)
+            this.waterMesh.destroy(device);
+        if (this.terrainMesh !== null)
+            this.terrainMesh.destroy(device);
         this.textureHolder.destroy(device);
     }
 }
@@ -249,7 +242,7 @@ class CrashWarpedScene implements SceneDesc {
             renderer.textureHolder.viewerTextures.push(data.viewerTexture);
         }
 
-        renderer.textureHolder.viewerTextures.sort((a: Texture, b: Texture) => a.name.localeCompare(b.name));
+        renderer.textureHolder.viewerTextures.sort((a: Texture, b: Texture) => a.gfxTexture.ResourceName!.localeCompare(b.gfxTexture.ResourceName!));
         QuadListData.textureAnimator = new TextureAnimator([], [], [], renderer.textureData);
 
         const cache = renderer.globals.renderHelper.renderCache;

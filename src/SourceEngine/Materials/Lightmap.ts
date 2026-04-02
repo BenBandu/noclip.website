@@ -1,19 +1,21 @@
 
 import { saturate } from "../../MathHelpers.js";
-import { TextureMapping } from "../../TextureHolder.js";
+import type { TextureMapping } from "../../TextureHolder.js";
 import { GfxDevice, GfxFormat, GfxMipFilterMode, GfxSampler, GfxTexFilterMode, GfxTexture, GfxTextureDimension, GfxTextureUsage, GfxWrapMode } from "../../gfx/platform/GfxPlatform.js";
-import { GfxRenderCache } from "../../gfx/render/GfxRenderCache.js";
+import type { GfxRenderCache } from "../../gfx/render/GfxRenderCache.js";
 import { assert, nArray } from "../../util.js";
-import { LightmapPacker, LightmapPackerPage, FaceLightmapData } from "../BSPFile.js";
-import { SourceRenderContext } from "../Main.js";
-import { BaseMaterial, RGBM_SCALE } from "./MaterialBase.js";
+import type { LightmapPacker, LightmapPackerPage, FaceLightmapData } from "../BSPFile.js";
+import type { SourceRenderContext } from "../Main.js";
+import type { BaseMaterial } from "./MaterialBase.js";
+
+export const RGBM_SCALE = 6.0;
 
 class LightmapPage {
     public gfxTexture: GfxTexture;
     public data: Uint8Array;
     public uploadDirty = false;
 
-    constructor(device: GfxDevice, public page: LightmapPackerPage) {
+    constructor(device: GfxDevice, public page: LightmapPackerPage, name: string) {
         const width = this.page.width, height = this.page.height, numSlices = 4;
 
         // RGBM seems to be good enough for all devices
@@ -29,6 +31,7 @@ class LightmapPage {
             depthOrArrayLayers: numSlices,
             numLevels: 1,
         });
+        device.setResourceName(this.gfxTexture, name);
 
         const fillEmptySpaceWithPink = false;
         if (fillEmptySpaceWithPink) {
@@ -84,7 +87,7 @@ export class LightmapManager {
     public appendPackerPages(manager: LightmapPacker): number {
         const startPage = this.lightmapPages.length;
         for (let i = 0; i < manager.pages.length; i++)
-            this.lightmapPages.push(new LightmapPage(this.device, manager.pages[i]));
+            this.lightmapPages.push(new LightmapPage(this.device, manager.pages[i], `LightmapPacker Page ${i}`));
         return startPage;
     }
 
@@ -212,7 +215,7 @@ function lightmapPackRuntimeBumpmap(dstPage: LightmapPage, location: Readonly<Fa
     }
 }
 
-const enum FaceLightmapUpdaterState {
+enum FaceLightmapUpdaterState {
     NotReady,
     NeedsUpload,
     Idle,

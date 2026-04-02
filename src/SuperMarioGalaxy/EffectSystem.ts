@@ -11,13 +11,13 @@ import { colorNewCopy, White, colorCopy, Color } from "../Color.js";
 import { computeModelMatrixR, getMatrixTranslation, vec3SetAll } from "../MathHelpers.js";
 import { DrawType, NameObj } from "./NameObj.js";
 import { LiveActor } from './LiveActor.js';
-import { TextureMapping } from '../TextureHolder.js';
 import { XanimePlayer } from './Animation.js';
 import { getJointMtxByName } from './ActorUtil.js';
-import { Texture } from '../viewer.js';
 import { Binder, Triangle, getFloorCodeIndex, FloorCode } from './Collision.js';
 import { Frustum } from '../Geometry.js';
 import { LoopMode } from '../Common/JSYSTEM/J3D/J3DLoader.js';
+import { GXTextureMapping } from '../gx/gx_render.js';
+import * as Viewer from "../viewer.js";
 
 export class ParticleResourceHolder {
     private effectNameToIndex = new Map<string, number>();
@@ -54,10 +54,8 @@ export class ParticleResourceHolder {
             return null;
 
         if (!this.resourceDatas.has(idx)) {
-            const device = sceneObjHolder.modelCache.device;
-            const cache = sceneObjHolder.modelCache.cache;
-            const resData = new JPA.JPAResourceData(device, cache, this.jpacData, this.jpac.effects[idx]);
-            resData.name = name;
+            const cache = sceneObjHolder.modelCache.renderCache;
+            const resData = new JPA.JPAResourceData(cache, this.jpacData, this.jpac.effects[idx], name);
             this.addTexturesForResource(sceneObjHolder, resData);
             this.resourceDatas.set(idx, resData);
         }
@@ -66,7 +64,7 @@ export class ParticleResourceHolder {
     }
 
     private addTexturesForResource(sceneObjHolder: SceneObjHolder, resData: JPA.JPAResourceData): void {
-        const viewerTextures: Texture[] = [];
+        const viewerTextures: Viewer.Texture[] = [];
         for (let i = 0; i < resData.textureIds.length; i++) {
             const textureId = resData.textureIds[i];
             if (textureId === undefined)
@@ -75,7 +73,7 @@ export class ParticleResourceHolder {
 
             if (!viewerTexture.extraInfo!.has('Category')) {
                 viewerTexture.extraInfo!.set('Category', 'JPA');
-                viewerTexture.name = `ParticleData/${viewerTexture.name}`;
+                sceneObjHolder.modelCache.device.setResourceName(viewerTexture.gfxTexture, `ParticleData/${viewerTexture.gfxTexture.ResourceName!}`);
             }
 
             viewerTextures.push(this.jpacData.texData[textureId].viewerTexture);
@@ -83,7 +81,7 @@ export class ParticleResourceHolder {
         sceneObjHolder.modelCache.textureListHolder.addTextures(viewerTextures);
     }
 
-    public getTextureMappingReference(name: string): TextureMapping | null {
+    public getTextureMappingReference(name: string): GXTextureMapping | null {
         return this.jpacData.getTextureMappingReference(name);
     }
 
@@ -108,7 +106,7 @@ function isDigitStringTail(s: string): boolean {
     return !!s.match(/\d+$/);
 }
 
-const enum SRTFlags {
+enum SRTFlags {
     None = 0, S = 1, R = 2, T = 4,
 }
 
@@ -187,7 +185,7 @@ class ParticleEmitter {
     }
 }
 
-const enum EmitterLoopMode {
+enum EmitterLoopMode {
     OneTime, Forever,
 }
 
@@ -1031,7 +1029,7 @@ export class ParticleEmitterHolder {
         const countMap = new Map<string, number>();
         for (let i = 0; i < this.particleEmitters.length; i++) {
             const emitter = this.particleEmitters[i].baseEmitter;
-            const name = emitter !== null ? emitter.resData.name : `!Free`;
+            const name = emitter !== null ? emitter.resData.name! : `!Free`;
             countMap.set(name, fallbackUndefined(countMap.get(name), 0) + 1);
         }
         const entries = [...countMap.entries()];
@@ -1082,7 +1080,7 @@ export class EffectSystem extends NameObj {
         // These numbers are from GameScene::initEffect.
         const maxParticleCount = 0x1800;
         const maxEmitterCount = 0x200;
-        this.emitterManager = new JPA.JPAEmitterManager(sceneObjHolder.modelCache.cache, maxParticleCount, maxEmitterCount);
+        this.emitterManager = new JPA.JPAEmitterManager(sceneObjHolder.modelCache.renderCache, maxParticleCount, maxEmitterCount);
 
         this.particleEmitterHolder = new ParticleEmitterHolder(this, maxParticleCount);
     }
@@ -1112,6 +1110,10 @@ export class EffectSystem extends NameObj {
 
     public drawEmitters(device: GfxDevice, renderInstManager: GfxRenderInstManager, groupID: number): void {
         this.emitterManager.draw(device, renderInstManager, this.drawInfo, groupID);
+    }
+
+    public prepareToRender(device: GfxDevice): void {
+        this.emitterManager.prepareToRender(device);
     }
 
     private createEmitter(resData: JPA.JPAResourceData, groupID: number): ParticleEmitter | null {

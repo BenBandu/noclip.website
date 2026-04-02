@@ -10,7 +10,7 @@ import { assert, assertExists, fallbackUndefined, nArray } from "../../util.js";
 import { ViewerRenderInput } from "../../viewer.js";
 import { AssetFile, AssetLocation, AssetObjectData, UnityAssetResourceType, UnityAssetSystem, UnityChannel, UnityMaterialData, UnityMeshData, createUnityAssetSystem } from "./AssetManager.js";
 import { rust } from "../../rustlib.js";
-import { UnityMeshRenderer, UnityVec3, UnityQuaternion, UnityTransform, UnityPPtr, UnityGameObject, UnityMeshFilter, UnityAssetFileObject, UnityVersion } from "../../../rust/pkg/noclip_support.js";
+import { UnityMeshRenderer, UnityVec3, UnityQuaternion, UnityTransform, UnityPPtr, UnityGameObject, UnityMeshFilter, UnityAssetFileObject, UnityVersion } from "noclip-rust-support";
 import { AABB } from "../../Geometry.js";
 
 export abstract class UnityComponent {
@@ -108,7 +108,7 @@ export class UnityShaderProgramBase extends DeviceProgram {
     public static ub_ShapeParams = 1;
 
     public static Common = `
-precision mediump float;
+precision highp float;
 
 ${GfxShaderLibrary.MatrixLibrary}
 

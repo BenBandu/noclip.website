@@ -2,15 +2,14 @@
 import { vec4 } from "gl-matrix";
 import { TextureMapping } from "../../TextureHolder.js";
 import { fillVec4v, fillColor } from "../../gfx/helpers/UniformBufferHelpers.js";
-import { GfxMegaStateDescriptor } from "../../gfx/platform/GfxPlatform.js";
-import { GfxProgram } from "../../gfx/platform/GfxPlatformImpl.js";
+import type { GfxMegaStateDescriptor, GfxProgram } from "../../gfx/platform/GfxPlatform.js";
 import { makeSortKey, GfxRendererLayer, setSortKeyProgramKey, GfxRenderInst } from "../../gfx/render/GfxRenderInstManager.js";
 import { assertExists, assert } from "../../util.js";
-import { SourceRenderContext } from "../Main.js";
+import type { SourceRenderContext } from "../Main.js";
 import { MaterialShaderTemplateBase, BaseMaterial, AlphaBlendMode, MaterialUtil } from "./MaterialBase.js";
 import { UberShaderInstanceBasic } from "../UberShader.js";
 import * as P from "./MaterialParameters.js";
-import { MaterialCache } from "./MaterialCache.js";
+import type { MaterialCache } from "./MaterialCache.js";
 import { colorScale } from "../../Color.js";
 
 //#region Sky
@@ -18,7 +17,7 @@ export class ShaderTemplate_Sky extends MaterialShaderTemplateBase {
     public static ub_ObjectParams = 2;
 
     public override program = `
-precision mediump float;
+precision highp float;
 
 ${MaterialShaderTemplateBase.Common}
 
@@ -54,7 +53,7 @@ export class ShaderTemplate_SkyHDRCompressed extends MaterialShaderTemplateBase 
     public static ub_ObjectParams = 2;
 
     public override program = `
-precision mediump float;
+precision highp float;
 
 ${MaterialShaderTemplateBase.Common}
 
@@ -118,7 +117,7 @@ void mainPS() {
 `;
 }
 
-const enum Material_Sky_Type {
+enum Material_Sky_Type {
     SkyHDRCompressed, Sky,
 }
 

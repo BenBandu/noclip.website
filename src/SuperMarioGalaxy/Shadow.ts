@@ -1,6 +1,6 @@
 
 import * as GX from "../gx/gx_enum.js";
-import { DrawParams, MaterialParams, GXMaterialHelperGfx, ColorKind, SceneParams, ub_SceneParamsBufferSize, fillSceneParamsData } from "../gx/gx_render.js";
+import { DrawParams, MaterialParams, GXMaterialHelperGfx, ColorKind, SceneParams, ub_SceneParamsBufferSize, fillSceneParamsData, GXTextureMapping } from "../gx/gx_render.js";
 
 import { LiveActor } from "./LiveActor.js";
 import { SceneObjHolder, SceneObj, SpecialTextureType } from "./Main.js";
@@ -22,9 +22,9 @@ import { TSDraw, TDDraw } from "./DDraw.js";
 import { GX_Program } from "../gx/gx_material.js";
 import ArrayBufferSlice from "../ArrayBufferSlice.js";
 import { colorFromRGBA } from "../Color.js";
-import { TextureMapping } from "../TextureHolder.js";
 import { GfxClipSpaceNearZ, GfxDevice } from "../gfx/platform/GfxPlatform.js";
 import { projectionMatrixConvertClipSpaceNearZ } from "../gfx/helpers/ProjectionHelpers.js";
+import { AABB } from "../Geometry.js";
 
 export function calcDropShadowVectorOrZero(sceneObjHolder: SceneObjHolder, nameObj: NameObj, pos: ReadonlyVec3, dst: vec3, gravityInfo: GravityInfo | null = null, attachmentFilter: any | null = null): boolean {
     return calcGravityVectorOrZero(sceneObjHolder, nameObj, pos, GravityTypeMask.Shadow, dst, gravityInfo, attachmentFilter);
@@ -35,9 +35,9 @@ function calcCameraDistanceZ(sceneObjHolder: SceneObjHolder, pos: vec3, scratch 
     return vec3.distance(scratch, pos);
 }
 
-const enum DropType { Normal, Surface }
-const enum CalcCollisionMode { Off, On, OneTime }
-const enum CalcDropGravityMode { Off, On, OneTime, PrivateOff, PrivateOn, PrivateOneTime }
+enum DropType { Normal, Surface }
+enum CalcCollisionMode { Off, On, OneTime }
+enum CalcDropGravityMode { Off, On, OneTime, PrivateOff, PrivateOn, PrivateOneTime }
 
 const scratchVec3a = vec3.create();
 const scratchVec3b = vec3.create();
@@ -345,8 +345,7 @@ function drawCircle(ddraw: TDDraw, pos: ReadonlyVec3, axis: ReadonlyVec3, radius
 }
 
 class ShadowSurfaceCircle extends ShadowSurfaceDrawer {
-    // TODO(jstpierre): TSDraw and a matrix if we ever find a place this is used.
-    private ddraw: TDDraw = new TDDraw();
+    private ddraw: TDDraw = new TDDraw('ShadowSurfaceCircle');
     public radius: number = 100.0;
 
     constructor(sceneObjHolder: SceneObjHolder, controller: ShadowController) {
@@ -361,7 +360,10 @@ class ShadowSurfaceCircle extends ShadowSurfaceDrawer {
 
         super.draw(sceneObjHolder, renderInstManager, viewerInput);
 
-        const cache = sceneObjHolder.modelCache.cache;
+        if (!sceneObjHolder.viewerInput.camera.frustum.containsSphere(this.controller.getProjectionPos(), this.radius))
+            return;
+
+        const cache = sceneObjHolder.modelCache.renderCache;
 
         const template = renderInstManager.pushTemplate();
         this.material.setOnRenderInst(cache, template);
@@ -424,7 +426,7 @@ abstract class ShadowVolumeDrawer extends ShadowDrawer {
         assert(this.materialBack.drawParamsBufferSize === this.materialFront.drawParamsBufferSize);
     }
 
-    protected isDraw(): boolean {
+    protected isDraw(sceneObjHolder: SceneObjHolder): boolean {
         return this.controller.isDraw();
     }
 
@@ -432,7 +434,7 @@ abstract class ShadowVolumeDrawer extends ShadowDrawer {
     protected abstract drawShapes(sceneObjHolder: SceneObjHolder, renderInstManager: GfxRenderInstManager): void;
 
     public override draw(sceneObjHolder: SceneObjHolder, renderInstManager: GfxRenderInstManager, viewerInput: ViewerRenderInput): void {
-        if (!this.isDraw())
+        if (!this.isDraw(sceneObjHolder))
             return;
 
         super.draw(sceneObjHolder, renderInstManager, viewerInput);
@@ -493,8 +495,19 @@ class ShadowVolumeSphere extends ShadowVolumeModel {
         this.initVolumeModel(sceneObjHolder, 'ShadowVolumeSphere');
     }
 
-    protected override isDraw(): boolean {
-        return this.controller.isProjected && super.isDraw();
+    protected override isDraw(sceneObjHolder: SceneObjHolder): boolean {
+        if (!this.controller.isProjected || !super.isDraw(sceneObjHolder))
+            return false;
+
+        let radius = this.radius;
+        if (this.controller.followHostScale)
+            radius *= this.controller.host.scale[0];
+        const center = this.controller.getProjectionPos();
+
+        if (!sceneObjHolder.viewerInput.camera.frustum.containsSphere(center, radius))
+            return false;
+
+        return true;
     }
 
     public loadDrawModelMtx(drawParams: DrawParams, viewerInput: ViewerRenderInput): void {
@@ -522,8 +535,8 @@ class ShadowVolumeOval extends ShadowVolumeModel {
         this.initVolumeModel(sceneObjHolder, 'ShadowVolumeSphere');
     }
 
-    protected override isDraw(): boolean {
-        return this.controller.isProjected && super.isDraw();
+    protected override isDraw(sceneObjHolder: SceneObjHolder): boolean {
+        return this.controller.isProjected && super.isDraw(sceneObjHolder);
     }
 
     public loadDrawModelMtx(drawParams: DrawParams, viewerInput: ViewerRenderInput): void {
@@ -644,13 +657,11 @@ class ShadowVolumeCylinder extends ShadowVolumeModel {
     }
 }
 
-function makeVtxFromAxes(dst: vec3, base: ReadonlyVec3, x: ReadonlyVec3, y: ReadonlyVec3, z: ReadonlyVec3, mx: 1 | -1, my: 1 | -1, mz: 1 | -1): void {
-}
-
+const scratchAABB = new AABB();
 class ShadowVolumeBox extends ShadowVolumeDrawer {
     public size = vec3.fromValues(100.0, 100.0, 100.0);
 
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('ShadowVolumeBox');
     private vtx: vec3[] = nArray(14, () => vec3.create());
 
     constructor(sceneObjHolder: SceneObjHolder, controller: ShadowController) {
@@ -731,7 +742,6 @@ class ShadowVolumeBox extends ShadowVolumeDrawer {
             vec3.add(this.vtx[1], this.vtx[1], scratchVec3d);
             vec3.add(this.vtx[2], this.vtx[2], scratchVec3d);
             vec3.add(this.vtx[3], this.vtx[3], scratchVec3d);
-
         } else {
             if (dotY >= 0.0) {
                 vec3.add(this.vtx[8], this.vtx[0], scratchVec3d);
@@ -771,7 +781,13 @@ class ShadowVolumeBox extends ShadowVolumeDrawer {
     protected drawShapes(sceneObjHolder: SceneObjHolder, renderInstManager: GfxRenderInstManager): void {
         this.makeVertexBuffer();
 
-        this.ddraw.beginDraw(sceneObjHolder.modelCache.cache);
+        scratchAABB.reset()
+        for (let i = 0; i < this.vtx.length; i++)
+            scratchAABB.unionPoint(this.vtx[i]);
+        if (!sceneObjHolder.viewerInput.camera.frustum.contains(scratchAABB))
+            return;
+
+        this.ddraw.beginDraw(sceneObjHolder.modelCache.renderCache);
 
         this.ddraw.begin(GX.Command.DRAW_TRIANGLE_STRIP);
         this.ddraw.position3vec3(this.vtx[0]);
@@ -812,7 +828,7 @@ class ShadowVolumeBox extends ShadowVolumeDrawer {
         this.ddraw.position3vec3(this.vtx[1]);
         this.ddraw.end();
 
-        const cache = sceneObjHolder.modelCache.cache;
+        const cache = sceneObjHolder.modelCache.renderCache;
         this.ddraw.endDraw(renderInstManager);
 
         const front = renderInstManager.newRenderInst();
@@ -841,7 +857,7 @@ class ShadowVolumeLine extends ShadowVolumeDrawer {
     public fromWidth: number = 100.0;
     public toWidth: number = 100.0;
 
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('ShadowVolumeLine');
     private vtx: vec3[] = nArray(8, () => vec3.create());
 
     constructor(sceneObjHolder: SceneObjHolder, controller: ShadowController) {
@@ -884,7 +900,7 @@ class ShadowVolumeLine extends ShadowVolumeDrawer {
         vec3.scaleAndAdd(this.vtx[7], this.vtx[5], dropDirTo, dropLengthTo);
 
         // Now send our points over.
-        const cache = sceneObjHolder.modelCache.cache;
+        const cache = sceneObjHolder.modelCache.renderCache;
         this.ddraw.beginDraw(cache);
 
         this.ddraw.begin(GX.Command.DRAW_QUADS);
@@ -1019,13 +1035,13 @@ class ShadowVolumeFlatModel extends ShadowVolumeModel {
 class AlphaShadow extends NameObj {
     private materialHelperDrawAlpha: GXMaterialHelperGfx;
     private orthoSceneParams = new SceneParams();
-    private orthoQuad = new TSDraw();
-    private textureMapping = new TextureMapping();
+    private orthoQuad = new TSDraw('AlphaShadow OrthoQuad');
+    private textureMapping = new GXTextureMapping();
 
     constructor(sceneObjHolder: SceneObjHolder) {
         super(sceneObjHolder, 'AlphaShadow');
 
-        const cache = sceneObjHolder.modelCache.cache;
+        const cache = sceneObjHolder.modelCache.renderCache;
 
         connectToScene(sceneObjHolder, this, MovementType.None, CalcAnimType.None, DrawBufferType.None, DrawType.AlphaShadow);
 
@@ -1051,7 +1067,7 @@ class AlphaShadow extends NameObj {
         this.orthoQuad.setVtxDesc(GX.Attr.POS, true);
         this.orthoQuad.setVtxDesc(GX.Attr.TEX0, true);
 
-        this.orthoQuad.beginDraw(sceneObjHolder.modelCache.cache);
+        this.orthoQuad.beginDraw(sceneObjHolder.modelCache.renderCache);
         this.orthoQuad.begin(GX.Command.DRAW_QUADS, 4);
         this.orthoQuad.position3f32(0, 0, 0);
         this.orthoQuad.texCoord2f32(GX.Attr.TEX0, 0, 0);

@@ -1,25 +1,25 @@
 import { mat4, ReadonlyVec3, vec3 } from "gl-matrix";
-import { makeBackbufferDescSimple, makeAttachmentClearDescriptor, opaqueBlackFullClearRenderPassDescriptor } from "../../gfx/helpers/RenderGraphHelpers.js";
+import { IS_DEVELOPMENT } from "../../BuildVersion.js";
+import { Color, colorCopy, colorNewCopy, OpaqueBlack, TransparentBlack, White } from "../../Color.js";
+import { makeMegaState } from "../../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
+import { GfxShaderLibrary } from "../../gfx/helpers/GfxShaderLibrary.js";
+import { makeAttachmentClearDescriptor, makeBackbufferDescSimple, opaqueBlackFullClearRenderPassDescriptor } from "../../gfx/helpers/RenderGraphHelpers.js";
+import { reverseDepthForCompareMode } from "../../gfx/helpers/ReversedDepthHelpers.js";
+import { convertToTriangleIndexBuffer, filterDegenerateTriangleIndexBuffer, GfxTopology } from "../../gfx/helpers/TopologyHelpers.js";
+import { fillColor, fillMatrix4x3, fillMatrix4x4, fillVec3v, fillVec4 } from "../../gfx/helpers/UniformBufferHelpers.js";
 import { GfxBindingLayoutDescriptor, GfxBlendFactor, GfxBuffer, GfxBufferFrequencyHint, GfxBufferUsage, GfxChannelWriteMask, GfxCompareMode, GfxCullMode, GfxDevice, GfxFormat, GfxIndexBufferDescriptor, GfxInputLayout, GfxInputLayoutBufferDescriptor, GfxMegaStateDescriptor, GfxMipFilterMode, GfxPrimitiveTopology, GfxProgram, GfxSamplerDescriptor, GfxTexFilterMode, GfxTexture, GfxVertexAttributeDescriptor, GfxVertexBufferDescriptor, GfxVertexBufferFrequency, GfxWrapMode, makeTextureDescriptor2D } from "../../gfx/platform/GfxPlatform.js";
 import { GfxrAttachmentSlot } from "../../gfx/render/GfxRenderGraph.js";
 import { GfxRenderHelper } from "../../gfx/render/GfxRenderHelper.js";
 import { GfxRenderInst, GfxRenderInstList } from "../../gfx/render/GfxRenderInstManager.js";
-import { SceneContext } from "../../SceneBase.js";
-import { ViewerRenderInput } from "../../viewer.js";
-import { RwAlphaTestFunction, RwBlendFunction, RwCamera, RwCullMode, RwPrimitiveType, RwRaster, RwRasterFormat, RwTextureAddressMode, RwTextureFilterMode } from "./rwcore.js";
-import { makeStaticDataBuffer } from "../../gfx/helpers/BufferHelpers.js";
-import { convertToTriangleIndexBuffer, convertToTriangles, filterDegenerateTriangleIndexBuffer, GfxTopology } from "../../gfx/helpers/TopologyHelpers.js";
-import { makeMegaState } from "../../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
-import { reverseDepthForCompareMode } from "../../gfx/helpers/ReversedDepthHelpers.js";
-import { fillColor, fillMatrix4x3, fillMatrix4x4, fillVec3v, fillVec4 } from "../../gfx/helpers/UniformBufferHelpers.js";
-import { Color, colorCopy, colorNewCopy, OpaqueBlack, TransparentBlack, White } from "../../Color.js";
-import { assert, nArray } from "../../util.js";
-import { TextureMapping } from "../../TextureHolder.js";
-import { DeviceProgram } from "../../Program.js";
-import { GfxShaderLibrary } from "../../gfx/helpers/GfxShaderLibrary.js";
-import { RpLightFlag, RpLightType, RpWorld } from "./rpworld.js";
 import { getMatrixAxisZ } from "../../MathHelpers.js";
-import { IS_DEVELOPMENT } from "../../BuildVersion.js";
+import { DeviceProgram } from "../../Program.js";
+import { SceneContext } from "../../SceneBase.js";
+import { TextureMapping } from "../../TextureHolder.js";
+import { nArray } from "../../util.js";
+import { ViewerRenderInput } from "../../viewer.js";
+import { RpLightFlag, RpLightType, RpWorld } from "./rpworld.js";
+import { RwAlphaTestFunction, RwBlendFunction, RwCamera, RwCullMode, RwRaster, RwRasterFormat, RwTextureAddressMode, RwTextureFilterMode } from "./rwcore.js";
+import { createBufferFromData } from "../../gfx/helpers/BufferHelpers.js";
 
 interface RwGfxProgramDefines {
     useNormalArray: boolean;
@@ -79,7 +79,7 @@ class RwGfxProgram extends DeviceProgram {
     }
     
     public override both = `
-precision mediump float;
+precision highp float;
 
 ${GfxShaderLibrary.MatrixLibrary}
 
@@ -264,20 +264,20 @@ function convertRwTextureFilterMode(filter: RwTextureFilterMode): GfxTexFilterMo
 
 function convertRwTextureFilterModeMip(filter: RwTextureFilterMode): GfxMipFilterMode {
     switch (filter) {
-    case RwTextureFilterMode.NEAREST:          return GfxMipFilterMode.NoMip;
-    case RwTextureFilterMode.LINEAR:           return GfxMipFilterMode.NoMip;
+    case RwTextureFilterMode.NEAREST:          return GfxMipFilterMode.Nearest;
+    case RwTextureFilterMode.LINEAR:           return GfxMipFilterMode.Nearest;
     case RwTextureFilterMode.MIPNEAREST:       return GfxMipFilterMode.Nearest;
     case RwTextureFilterMode.MIPLINEAR:        return GfxMipFilterMode.Nearest;
     case RwTextureFilterMode.LINEARMIPNEAREST: return GfxMipFilterMode.Linear;
     case RwTextureFilterMode.LINEARMIPLINEAR:  return GfxMipFilterMode.Linear;
-    default:                                   return GfxMipFilterMode.NoMip;
+    default:                                   return GfxMipFilterMode.Nearest;
     }
 }
 
-function convertGfxFilterModes(texFilter: GfxTexFilterMode, mipFilter: GfxMipFilterMode): RwTextureFilterMode {
-    switch (texFilter | (mipFilter << 8)) {
-    case (GfxTexFilterMode.Point | (GfxMipFilterMode.NoMip << 8)):      return RwTextureFilterMode.NEAREST;
-    case (GfxTexFilterMode.Bilinear | (GfxMipFilterMode.NoMip << 8)):   return RwTextureFilterMode.LINEAR;
+function convertGfxFilterModes(texFilter: GfxTexFilterMode, mipFilter: GfxMipFilterMode, isNoMip: boolean): RwTextureFilterMode {
+    switch (texFilter | (mipFilter << 8) | (isNoMip ? (1 << 16) : 0)) {
+    case (GfxTexFilterMode.Point | (1 << 16)):                          return RwTextureFilterMode.NEAREST;
+    case (GfxTexFilterMode.Bilinear | (1 << 16)):                       return RwTextureFilterMode.LINEAR;
     case (GfxTexFilterMode.Point | (GfxMipFilterMode.Nearest << 8)):    return RwTextureFilterMode.MIPNEAREST;
     case (GfxTexFilterMode.Bilinear | (GfxMipFilterMode.Nearest << 8)): return RwTextureFilterMode.MIPLINEAR;
     case (GfxTexFilterMode.Point | (GfxMipFilterMode.Linear << 8)):     return RwTextureFilterMode.LINEARMIPNEAREST;
@@ -398,9 +398,11 @@ export class RwGfx {
     private samplerDescriptor: GfxSamplerDescriptor = {
         magFilter: GfxTexFilterMode.Point,
         minFilter: GfxTexFilterMode.Point,
-        mipFilter: GfxMipFilterMode.NoMip,
+        mipFilter: GfxMipFilterMode.Nearest,
         wrapS: GfxWrapMode.Repeat,
         wrapT: GfxWrapMode.Repeat,
+        minLOD: 0,
+        maxLOD: 0,
     };
 
     private fogEnabled = false;
@@ -471,7 +473,7 @@ export class RwGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, this.viewerInput.onscreenTexture);
         
         this.renderHelper.prepareToRender();
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
 
         this.renderInstList.reset();
     }
@@ -539,17 +541,17 @@ export class RwGfx {
             }
         }
 
-        const buffer = makeStaticDataBuffer(this.device, GfxBufferUsage.Vertex, data.buffer);
-        const descriptors = [{ buffer, byteOffset: 0 }];
+        const buffer = createBufferFromData(this.device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, data.buffer);
+        const descriptors = [{ buffer }];
 
         return { buffer, data, vertexCount, descriptors };
     }
 
     public createDynamicVertexBuffer(vertexCount: number): RwGfxVertexBuffer {
         const wordCount = vertexCount * 12;
-        const buffer = this.device.createBuffer(wordCount, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Dynamic);
         const data = new Float32Array(wordCount);
-        const descriptors = [{ buffer, byteOffset: 0 }];
+        const buffer = this.device.createBuffer(data.byteLength, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Dynamic);
+        const descriptors = [{ buffer }];
 
         return { buffer, data, vertexCount, descriptors };
     }
@@ -589,18 +591,17 @@ export class RwGfx {
     public createIndexBuffer(indices: Uint16Array): RwGfxIndexBuffer {
         const data = filterDegenerateTriangleIndexBuffer(convertToTriangleIndexBuffer(GfxTopology.TriStrips, indices));
 
-        const buffer = makeStaticDataBuffer(this.device, GfxBufferUsage.Index, data.buffer);
-        const descriptor = { buffer, byteOffset: 0 };
+        const buffer = createBufferFromData(this.device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, data.buffer);
+        const descriptor = { buffer };
         const indexCount = data.length;
 
         return { buffer, data, descriptor, indexCount };
     }
 
     public createDynamicIndexBuffer(indexCount: number): RwGfxIndexBuffer {
-        const wordCount = (indexCount + 1) / 2;
-        const buffer = this.device.createBuffer(wordCount, GfxBufferUsage.Index, GfxBufferFrequencyHint.Dynamic);
-        const data = new Uint16Array(wordCount);
-        const descriptor = { buffer, byteOffset: 0 };
+        const data = new Uint16Array(indexCount);
+        const buffer = this.device.createBuffer(data.byteLength, GfxBufferUsage.Index, GfxBufferFrequencyHint.Dynamic);
+        const descriptor = { buffer };
 
         return { buffer, data, descriptor, indexCount };
     }
@@ -653,9 +654,6 @@ export class RwGfx {
         this.device.uploadTextureData(raster.gfxTexture, 0, raster.levels);
 
         const mapping = raster.textureMapping[0];
-        mapping.width = raster.width;
-        mapping.height = raster.height;
-        mapping.flipY = false;
         mapping.gfxTexture = raster.gfxTexture;
     }
 
@@ -787,10 +785,12 @@ export class RwGfx {
         this.samplerDescriptor.magFilter = convertRwTextureFilterMode(filter);
         this.samplerDescriptor.minFilter = this.samplerDescriptor.magFilter;
         this.samplerDescriptor.mipFilter = convertRwTextureFilterModeMip(filter);
+        const isNoMip = filter === RwTextureFilterMode.NEAREST || filter === RwTextureFilterMode.LINEAR;
+        this.samplerDescriptor.maxLOD = isNoMip ? 0 : 100;
     }
 
     public getTextureFilter() {
-        return convertGfxFilterModes(this.samplerDescriptor.magFilter, this.samplerDescriptor.mipFilter);
+        return convertGfxFilterModes(this.samplerDescriptor.magFilter, this.samplerDescriptor.mipFilter, this.samplerDescriptor.maxLOD === 0);
     }
 
     public setTextureAddressU(address: RwTextureAddressMode) {
@@ -1095,12 +1095,8 @@ export class RwGfx {
     private bindTexture(renderInst: GfxRenderInst) {
         if (this.textureRaster && this.textureRaster.gfxRaster.gfxTexture) {
             const mapping = this.textureMapping[0];
-            mapping.width = this.textureRaster.width;
-            mapping.height = this.textureRaster.height;
-            mapping.flipY = false;
             mapping.gfxTexture = this.textureRaster.gfxRaster.gfxTexture;
             mapping.gfxSampler = this.renderHelper.renderCache.createSampler(this.samplerDescriptor);
-
             renderInst.setSamplerBindingsFromTextureMappings(this.textureMapping);
         }
     }

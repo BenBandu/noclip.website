@@ -1,11 +1,10 @@
 
-import { TextureHolder, LoadedTexture, TextureMapping } from "../TextureHolder.js";
+import { TextureHolder, TextureMapping } from "../TextureHolder.js";
 import { PPAK_Texture, TextureFormat, getTextureFormatName } from "./ppf.js";
 import { GfxDevice, GfxFormat, GfxBufferUsage, GfxBuffer, GfxVertexAttributeDescriptor, GfxVertexBufferFrequency, GfxInputLayout, GfxVertexBufferDescriptor, GfxBufferFrequencyHint, GfxBindingLayoutDescriptor, GfxProgram, GfxSampler, GfxTexFilterMode, GfxMipFilterMode, GfxWrapMode, GfxTextureDimension, GfxRenderPass, GfxIndexBufferDescriptor, GfxInputLayoutBufferDescriptor, makeTextureDescriptor2D, GfxMegaStateDescriptor, GfxBlendMode, GfxBlendFactor, GfxCullMode, GfxFrontFaceMode } from "../gfx/platform/GfxPlatform.js";
 import * as Viewer from "../viewer.js";
-import { decompressBC, DecodedSurfaceSW, surfaceToCanvas } from "../Common/bc_texture.js";
+import { decompressBC, DecodedSurfaceSW } from "../Common/bc_texture.js";
 import { EMeshFrag, EMesh, EScene, EDomain, MaterialFlags } from "./plb.js";
-import { makeStaticDataBuffer, makeStaticDataBufferFromSlice } from "../gfx/helpers/BufferHelpers.js";
 import { DeviceProgram } from "../Program.js";
 import { convertToTriangleIndexBuffer, filterDegenerateTriangleIndexBuffer } from "../gfx/helpers/TopologyHelpers.js";
 import { fillMatrix4x3, fillMatrix4x4, fillVec4, fillVec4v } from "../gfx/helpers/UniformBufferHelpers.js";
@@ -21,6 +20,7 @@ import { AABB } from '../Geometry.js';
 import { setAttachmentStateSimple } from '../gfx/helpers/GfxMegaStateDescriptorHelpers.js';
 import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
 import { GfxShaderLibrary } from "../gfx/helpers/GfxShaderLibrary.js";
+import { createBufferFromData, createBufferFromSlice } from "../gfx/helpers/BufferHelpers.js";
 
 function decodeTextureData(format: TextureFormat, width: number, height: number, pixels: Uint8Array<ArrayBuffer>): DecodedSurfaceSW {
     switch (format) {
@@ -39,16 +39,16 @@ function decodeTextureData(format: TextureFormat, width: number, height: number,
     }
 }
 
-export class PsychonautsTextureHolder extends TextureHolder<PPAK_Texture> {
+export class PsychonautsTextureHolder extends TextureHolder {
     private ppakTextures: PPAK_Texture[] = [];
 
     public findPPAKTexture(name: string): PPAK_Texture {
         return assertExists(this.ppakTextures.find((t) => t.name === name));
     }
 
-    public loadTexture(device: GfxDevice, texture: PPAK_Texture): LoadedTexture | null {
+    public addTexture(device: GfxDevice, texture: PPAK_Texture): void {
         if (texture.mipData.length === 0)
-            return null;
+            return;
 
         const levelDatas: Uint8Array[] = [];
         const surfaces: HTMLCanvasElement[] = [];
@@ -58,10 +58,6 @@ export class PsychonautsTextureHolder extends TextureHolder<PPAK_Texture> {
             const pixels = texture.mipData[i].createTypedArray(Uint8Array);
             const decodedSurface = decodeTextureData(texture.format, mipWidth, mipHeight, pixels);
             levelDatas.push(decodedSurface.pixels as Uint8Array);
-
-            const canvas = document.createElement('canvas');
-            surfaceToCanvas(canvas, decodedSurface);
-            surfaces.push(canvas);
 
             if (mipWidth > 1) mipWidth >>>= 1;
             if (mipHeight > 1) mipHeight >>>= 1;
@@ -73,12 +69,14 @@ export class PsychonautsTextureHolder extends TextureHolder<PPAK_Texture> {
         const extraInfo = new Map<string, string>();
         extraInfo.set('Format', getTextureFormatName(texture.format));
         const displayName = texture.name.split('/').pop()!;
-        const viewerTexture: Viewer.Texture = { name: displayName, surfaces, extraInfo };
+        const viewerTexture: Viewer.Texture = { gfxTexture, extraInfo };
         device.setResourceName(gfxTexture, displayName);
 
         this.ppakTextures.push(texture);
 
-        return { gfxTexture, viewerTexture };
+        this.gfxTextures.push(gfxTexture);
+        this.viewerTextures.push(viewerTexture);
+        this.textureNames.push(texture.name);
     }
 }
 
@@ -92,7 +90,7 @@ class PsychonautsProgram extends DeviceProgram {
     public static ub_MeshFragParams = 1;
 
     public override both = `
-precision mediump float;
+precision highp float;
 
 ${GfxShaderLibrary.MatrixLibrary}
 
@@ -188,16 +186,16 @@ class MeshFragData {
     constructor(cache: GfxRenderCache, public meshFrag: EMeshFrag) {
         const device = cache.device;
 
-        this.posNrmBuffer = makeStaticDataBufferFromSlice(device, GfxBufferUsage.Vertex, meshFrag.streamPosNrm);
+        this.posNrmBuffer = createBufferFromSlice(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, meshFrag.streamPosNrm);
 
         if (meshFrag.streamColor === null || meshFrag.streamUV === null)
-            this.zeroBuffer = device.createBuffer(32, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static)
+            this.zeroBuffer = device.createBuffer(32, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static);
 
-        this.colorBuffer = meshFrag.streamColor ? makeStaticDataBufferFromSlice(device, GfxBufferUsage.Vertex, meshFrag.streamColor) : null;
+        this.colorBuffer = meshFrag.streamColor ? createBufferFromSlice(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, meshFrag.streamColor) : null;
 
         if (meshFrag.streamUVCount > 0) {
             const uvData = decodeStreamUV(meshFrag.streamUV!, meshFrag.iVertCount, meshFrag.streamUVCount, meshFrag.uvCoordScale);
-            this.uvBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, uvData.buffer);
+            this.uvBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, uvData.buffer);
         } else {
             this.uvBuffer = null;
         }
@@ -205,7 +203,7 @@ class MeshFragData {
         const numIndexes = meshFrag.streamIdx.byteLength / 2;
         const triIdxData = convertToTriangleIndexBuffer(meshFrag.topology, meshFrag.streamIdx.createTypedArray(Uint16Array, 0, numIndexes));
         const idxData = filterDegenerateTriangleIndexBuffer(triIdxData);
-        this.idxBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, idxData.buffer);
+        this.idxBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, idxData.buffer);
         this.indexCount = idxData.length;
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
@@ -226,11 +224,11 @@ class MeshFragData {
             indexBufferFormat: GfxFormat.U16_R,
         });
         this.vertexBufferDescriptors = [
-            { buffer: this.posNrmBuffer, byteOffset: 0 },
-            { buffer: this.colorBuffer !== null ? this.colorBuffer : this.zeroBuffer!, byteOffset: 0, },
-            { buffer: this.uvBuffer !== null ? this.uvBuffer : this.zeroBuffer!, byteOffset: 0, },
+            { buffer: this.posNrmBuffer },
+            { buffer: this.colorBuffer !== null ? this.colorBuffer : this.zeroBuffer! },
+            { buffer: this.uvBuffer !== null ? this.uvBuffer : this.zeroBuffer! },
         ];
-        this.indexBufferDescriptor = { buffer: this.idxBuffer, byteOffset: 0 };
+        this.indexBufferDescriptor = { buffer: this.idxBuffer };
     }
 
     public destroy(device: GfxDevice): void {
@@ -309,11 +307,8 @@ class MeshFragInstance {
         const fillTextureReference = (dst: TextureMapping, textureId: number) => {
             const textureReference = scene.textureReferences[textureId];
 
-            if (textureHolder.hasTexture(textureReference.textureName)) {
-                textureHolder.fillTextureMapping(dst, textureReference.textureName);
-            } else {
+            if (!textureHolder.fillTextureMapping(dst, textureReference.textureName))
                 dst.gfxTexture = null;
-            }
 
             dst.gfxSampler = gfxSampler;
         };
@@ -553,7 +548,7 @@ export class PsychonautsRenderer {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListMain.reset();
     }
 

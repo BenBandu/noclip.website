@@ -129,7 +129,7 @@ class ModelCache {
     }
 }
 
-const enum ZSSPass {
+enum ZSSPass {
     SKYBOX = 1 << 0,
     MAIN = 1 << 1,
     INDIRECT = 1 << 2,
@@ -139,12 +139,12 @@ class ZSSTextureHolder extends RRESTextureHolder {
     public override findTextureEntryIndex(name: string): number {
         let i: number = -1;
 
-        i = this.searchTextureEntryIndex(name);
+        i = super.findTextureEntryIndex(name);
         if (i >= 0) return i;
 
         // HACK(jstpierre): Thrill Digger (F211) seems to have a missing texture. Where is it???
         if (name === 'F211_Wood01')
-            return this.searchTextureEntryIndex('F211_Wood02');
+            return super.findTextureEntryIndex('F211_Wood02');
 
         return -1;
     }
@@ -464,7 +464,7 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
                 pass.attachResolveTexture(opaqueSceneTextureID);
 
                 pass.exec((passRenderer, scope) => {
-                    this.renderInstListInd.resolveLateSamplerBinding('opaque-scene-texture', { gfxTexture: scope.getResolveTextureForID(opaqueSceneTextureID), gfxSampler: null, lateBinding: null });
+                    this.renderInstListInd.resolveLateSamplerBinding('opaque-scene-texture', { gfxTexture: scope.getResolveTextureForID(opaqueSceneTextureID), gfxSampler: null });
                     this.renderInstListInd.drawOnPassRenderer(this.renderHelper.renderCache, passRenderer);
                 });
             });
@@ -473,7 +473,7 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.renderHelper.prepareToRender();
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListSky.reset();
         this.renderInstListMain.reset();
         this.renderInstListInd.reset();
@@ -581,7 +581,7 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
             // Scan add for non-zero nodes
             // if non-zero -> merge into main using the same name
             chrAdd.nodeAnimations.forEach( animNode => {
-                if (animNode.scaleX === undefined) {
+                if (animNode.scaleX === null) {
                     const mainAnimNode = chrMain.nodeAnimations.findIndex((node) => node.nodeName === animNode.nodeName);
                     if (mainAnimNode !== -1)
                         chrMain.nodeAnimations[mainAnimNode] = animNode;

@@ -2,21 +2,19 @@
 import { mat4, ReadonlyMat4, ReadonlyVec3, vec3 } from "gl-matrix";
 import { GXMaterialBuilder } from "../gx/GXMaterialBuilder.js";
 import * as GX from "../gx/gx_enum.js";
-import { ColorKind, DrawParams, GXMaterialHelperGfx, MaterialParams } from "../gx/gx_render.js";
+import { ColorKind, DrawParams, GXMaterialHelperGfx, GXTextureMapping, MaterialParams } from "../gx/gx_render.js";
 
 import { Camera } from "../Camera.js";
 import { colorFromRGBA8, colorNewFromRGBA8 } from "../Color.js";
 import { J3DModelData } from "../Common/JSYSTEM/J3D/J3DGraphBase.js";
 import { invlerp, saturate, setMatrixTranslation, Vec3Zero } from "../MathHelpers.js";
 import { DeviceProgram } from "../Program.js";
-import { TextureMapping } from "../TextureHolder.js";
 import { fullscreenMegaState, makeMegaState, setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
 import { GfxShaderLibrary, glslGenerateFloat } from "../gfx/helpers/GfxShaderLibrary.js";
 import { reverseDepthForDepthOffset } from "../gfx/helpers/ReversedDepthHelpers.js";
 import { fillColor, fillVec4 } from "../gfx/helpers/UniformBufferHelpers.js";
-import { GfxBindingLayoutDescriptor, GfxBlendFactor, GfxBlendMode, GfxCompareMode, GfxDevice, GfxMegaStateDescriptor, GfxMipFilterMode, GfxTexFilterMode, GfxWrapMode } from "../gfx/platform/GfxPlatform.js";
+import { GfxBindingLayoutDescriptor, GfxBlendFactor, GfxBlendMode, GfxCompareMode, GfxDevice, GfxMegaStateDescriptor, GfxMipFilterMode, GfxProgram, GfxTexFilterMode, GfxWrapMode } from "../gfx/platform/GfxPlatform.js";
 import { GfxFormat } from "../gfx/platform/GfxPlatformFormat.js";
-import { GfxProgram } from "../gfx/platform/GfxPlatformImpl.js";
 import { GfxrAttachmentSlot, GfxrGraphBuilder, GfxrRenderTargetDescription, GfxrRenderTargetID } from "../gfx/render/GfxRenderGraph.js";
 import { GfxRenderInst, GfxRenderInstManager } from "../gfx/render/GfxRenderInstManager.js";
 import { GXShaderLibrary } from "../gx/gx_material.js";
@@ -242,7 +240,7 @@ function calcNerveEaseOutValue(actor: LiveActor, maxStep: number, minValue: numb
     return getEaseOutValue(t, minValue, maxValue);
 }
 
-const enum ClipAreaDropNrv { Wait }
+enum ClipAreaDropNrv { Wait }
 class ClipAreaDrop extends ClipArea<ClipAreaDropNrv> {
     private baseSize: number;
     private sphere: ClipAreaShapeSphere;
@@ -325,14 +323,14 @@ function moveCoordAndCheckPassPointNo(actor: LiveActor, speed: number): number {
     return -1;
 }
 
-const enum ClipAreaDropLaserNrv { Wait, Move }
+enum ClipAreaDropLaserNrv { Wait, Move }
 export class ClipAreaDropLaser extends LiveActor<ClipAreaDropLaserNrv> {
     private moveSpeed: number;
     private drawCount: number = 0;
     private headPointIndex: number = 0;
     private gapPoint: number = 0;
 
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('ClipAreaDropLaser');
     private materialLaser: GXMaterialHelperGfx;
     private points: vec3[] = nArray(64, () => vec3.create());
 
@@ -429,7 +427,7 @@ export class ClipAreaDropLaser extends LiveActor<ClipAreaDropLaserNrv> {
             return;
 
         const ddraw = this.ddraw;
-        ddraw.beginDraw(sceneObjHolder.modelCache.cache);
+        ddraw.beginDraw(sceneObjHolder.modelCache.renderCache);
 
         getCamZdir(scratchVec3b, viewerInput.camera);
 
@@ -663,7 +661,7 @@ export class FallOutFieldDraw extends NameObj {
         depthCompare: GfxCompareMode.Always,
     }, fullscreenMegaState);
 
-    private textureMapping: TextureMapping[] = nArray(1, () => new TextureMapping());
+    private textureMapping: GXTextureMapping[] = nArray(1, () => new GXTextureMapping());
 
     private target2ColorDesc = new GfxrRenderTargetDescription(GfxFormat.U8_R_NORM);
     private target4ColorDesc = new GfxrRenderTargetDescription(GfxFormat.U8_R_NORM);
@@ -680,7 +678,7 @@ export class FallOutFieldDraw extends NameObj {
             this.activate(sceneObjHolder);
         }
 
-        const cache = sceneObjHolder.modelCache.cache;
+        const cache = sceneObjHolder.modelCache.renderCache;
         const linearSampler = cache.createSampler({
             wrapS: GfxWrapMode.Clamp,
             wrapT: GfxWrapMode.Clamp,

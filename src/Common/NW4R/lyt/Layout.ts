@@ -10,9 +10,8 @@ import { GXMaterial, SwapTable, TevDefaultSwapTables, getRasColorChannelID, GX_P
 import { GfxRenderInst, GfxRenderInstManager } from "../../../gfx/render/GfxRenderInstManager.js";
 import { GfxDevice, GfxSampler } from "../../../gfx/platform/GfxPlatform.js";
 import { GfxRenderCache } from "../../../gfx/render/GfxRenderCache.js";
-import { TextureMapping } from "../../../TextureHolder.js";
 import { TDDraw } from "../../../SuperMarioGalaxy/DDraw.js";
-import { ColorKind, GXMaterialHelperGfx, MaterialParams } from "../../../gx/gx_render.js";
+import { ColorKind, GXMaterialHelperGfx, GXTextureMapping, MaterialParams } from "../../../gx/gx_render.js";
 import { TEX1_SamplerSub, translateSampler } from "../../JSYSTEM/JUTTexture.js";
 import { getPointHermite } from "../../../Spline.js";
 import { arrayCopy } from '../../../gfx/platform/GfxPlatformObjUtil.js';
@@ -58,7 +57,7 @@ interface RLYTTextureBinding {
     kind: number;
 }
 
-const enum RLYTPaneKind {
+enum RLYTPaneKind {
     Pane     = 'pan1',
     Picture  = 'pic1',
     Textbox  = 'txt1',
@@ -66,13 +65,13 @@ const enum RLYTPaneKind {
     Bounding = 'bnd1',
 }
 
-const enum RLYTPaneFlags {
+enum RLYTPaneFlags {
     Visible        = 0b0001,
     PropagateAlpha = 0b0010,
     AspectAdjust   = 0b0100,
 }
 
-const enum RLYTBasePosition {
+enum RLYTBasePosition {
     TopLeft, TopMiddle, TopRight,
     CenterLeft, CenterMiddle, CenterRight,
     BottomLeft, BottomMiddle, BottomRight,
@@ -105,7 +104,7 @@ interface RLYTPicture extends RLYTPaneBase, RLYTWindowContent {
     kind: RLYTPaneKind.Picture;
 }
 
-const enum RLYTTextAlignment { Justify, Left, Center, Right }
+enum RLYTTextAlignment { Justify, Left, Center, Right }
 
 interface RLYTTextbox extends RLYTPaneBase {
     kind: RLYTPaneKind.Textbox;
@@ -123,7 +122,7 @@ interface RLYTTextbox extends RLYTPaneBase {
     str: string;
 }
 
-const enum RLYTTextureFlip {
+enum RLYTTextureFlip {
     None, FlipH, FlipV, Rotate90, Rotate180, Rotate270,
 }
 
@@ -661,12 +660,12 @@ export function parseBRLYT(buffer: ArrayBufferSlice): RLYT {
 //#endregion
 
 //#region BRLAN
-const enum RLANAnimationType {
+enum RLANAnimationType {
     Pane, Material,
 }
 
 // Combined track type enum
-const enum RLANAnimationTrackType {
+enum RLANAnimationTrackType {
     _PaneTransform_First = 0x000,
     PaneTransform_TranslationX = _PaneTransform_First,
     PaneTransform_TranslationY,
@@ -852,7 +851,7 @@ export function parseBRLAN(buffer: ArrayBufferSlice): RLAN {
                         const targetType = view.getUint8(trackOffs + 0x01);
                         const type: RLANAnimationTrackType = trackTypeBase + targetType;
 
-                        const enum CurveType { Constant, Step, Hermite }
+                        enum CurveType { Constant, Step, Hermite }
                         const curveType: CurveType = view.getUint8(trackOffs + 0x02);
 
                         // Ensure the curve type matches our track type.
@@ -957,14 +956,14 @@ export class LayoutDrawInfo {
 }
 
 interface LayoutResourceCollection {
-    fillTextureByName(dst: TextureMapping, name: string): void;
+    fillTextureByName(dst: GXTextureMapping, name: string): void;
     getFontByName(name: string): ResFont | null;
 }
 
 export class LayoutResourceCollectionBasic {
     public textureHolder = new TPLTextureHolder();
 
-    public fillTextureByName(dst: TextureMapping, name: string): void {
+    public fillTextureByName(dst: GXTextureMapping, name: string): void {
         this.textureHolder.fillTextureMapping(dst, name);
     }
 
@@ -1829,24 +1828,25 @@ class LayoutMaterial {
 }
 
 export class Layout {
-    private ddraw = new TDDraw();
+    private ddraw: TDDraw;
     public fontNames: string[];
     public materials: LayoutMaterial[];
     public rootPane: LayoutPane;
     public charWriter = new CharWriter();
 
-    constructor(device: GfxDevice, cache: GfxRenderCache, rlyt: RLYT, public resourceCollection: LayoutResourceCollection) {
+    constructor(device: GfxDevice, cache: GfxRenderCache, rlyt: RLYT, public resourceCollection: LayoutResourceCollection, name: string = '') {
         this.materials = rlyt.mat1.map((material) => new LayoutMaterial(device, cache, material, rlyt.txl1, resourceCollection));
         this.fontNames = rlyt.fnl1.map((font) => font.filename);
         this.rootPane = LayoutPane.parse(rlyt.rootPane, this);
+
+        this.ddraw = new TDDraw(`Layout ${name}`);
 
         const ddraw = this.ddraw;
         ddraw.setVtxDesc(GX.Attr.POS, true);
         ddraw.setVtxDesc(GX.Attr.CLR0, true);
 
-        for (let i = 0; i < MaxTexCoordChan; i++) {
+        for (let i = 0; i < MaxTexCoordChan; i++)
             ddraw.setVtxDesc(GX.Attr.TEX0 + i, true);
-        }
     }
 
     public findMaterialByName(name: string): LayoutMaterial | null {

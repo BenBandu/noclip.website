@@ -1,52 +1,57 @@
 
+import { mat4 } from "gl-matrix";
 import ArrayBufferSlice from "../ArrayBufferSlice.js";
-import { convertToCanvas } from "../gfx/helpers/TextureConversionHelpers.js";
-import { GfxBindingLayoutDescriptor, GfxDevice, GfxFormat, makeTextureDescriptor2D, GfxTexture } from "../gfx/platform/GfxPlatform.js";
+import * as BYML from '../byml.js';
+import { CameraController } from "../Camera.js";
+import { Magenta, White } from "../Color.js";
+import { DataFetcher } from "../DataFetcher.js";
+import { makeBackbufferDescSimple, standardFullClearRenderPassDescriptor } from "../gfx/helpers/RenderGraphHelpers.js";
+import { makeSolidColorTexture2D } from "../gfx/helpers/TextureHelpers.js";
+import { fillMatrix4x3, fillMatrix4x4 } from "../gfx/helpers/UniformBufferHelpers.js";
+import { GfxBindingLayoutDescriptor, GfxDevice, GfxFormat, GfxTexture, makeTextureDescriptor2D } from "../gfx/platform/GfxPlatform.js";
+import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
+import { GfxrAttachmentSlot } from "../gfx/render/GfxRenderGraph.js";
 import { GfxRenderHelper } from "../gfx/render/GfxRenderHelper.js";
+import { GfxRenderInstList } from "../gfx/render/GfxRenderInstManager.js";
 import { SceneContext, SceneDesc, SceneGroup } from "../SceneBase.js";
-import { LoadedTexture, TextureHolder } from "../TextureHolder.js";
+import { TextureHolder, TextureMapping } from "../TextureHolder.js";
 import { assert, assertExists, hexzero0x, readString } from "../util.js";
 import { SceneGfx, ViewerRenderInput } from "../viewer.js";
 import * as AFS from './AFS.js';
-import * as BYML from '../byml.js';
-import * as PVRT from "./PVRT.js";
 import * as Ninja from "./Ninja.js";
+import * as PVRT from "./PVRT.js";
 import { NjsActionData, NjsActionInstance } from "./Render.js";
-import { CameraController } from "../Camera.js";
-import { makeBackbufferDescSimple, standardFullClearRenderPassDescriptor } from "../gfx/helpers/RenderGraphHelpers.js";
-import { GfxrAttachmentSlot } from "../gfx/render/GfxRenderGraph.js";
-import { fillMatrix4x3, fillMatrix4x4 } from "../gfx/helpers/UniformBufferHelpers.js";
-import { mat4 } from "gl-matrix";
-import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
-import { DataFetcher } from "../DataFetcher.js";
-import { makeSolidColorTexture2D } from "../gfx/helpers/TextureHelpers.js";
-import { Cyan, Magenta, Yellow , White} from "../Color.js";
-import { GfxRenderInstList } from "../gfx/render/GfxRenderInstManager.js";
 
 const pathBase = `JetSetRadio`;
 
-function surfaceToCanvas(textureLevel: PVRT.PVR_TextureLevel): HTMLCanvasElement {
-    return convertToCanvas(ArrayBufferSlice.fromView(textureLevel.data), textureLevel.width, textureLevel.height);
-}
+export class PVRTextureHolder extends TextureHolder {
+    public texMappingMagenta = new TextureMapping();
+    public texMappingWhite = new TextureMapping();
 
-function textureToCanvas(texture: PVRT.PVR_Texture) {
-    const surfaces = texture.levels.map((textureLevel) => surfaceToCanvas(textureLevel));
-    const extraInfo = new Map<string, string>();
-    extraInfo.set('Format', PVRT.getFormatName(texture.format));
-    return { name: texture.name, surfaces, extraInfo };
-}
-
-export class PVRTextureHolder extends TextureHolder<PVRT.PVR_Texture> {
     public getTextureName(id: number): string {
         return hexzero0x(id, 4);
     }
 
-    protected loadTexture(device: GfxDevice, textureEntry: PVRT.PVR_Texture): LoadedTexture | null {
+    public override fillTextureMapping(dst: TextureMapping, name: string): boolean {
+        // XXX(jstpierre): Missing texture hacks.
+        if (name === '_magenta') {
+            dst.copy(this.texMappingMagenta);
+            return true;
+        } else if (name === '_white') {
+            dst.copy(this.texMappingWhite);
+            return true;
+        } else {
+            return super.fillTextureMapping(dst, name);
+        }
+    }
+
+    public addTexture(device: GfxDevice, textureEntry: PVRT.PVR_Texture): void {
         const gfxTexture = device.createTexture(makeTextureDescriptor2D(GfxFormat.U8_RGBA_SRGB, textureEntry.width, textureEntry.height, textureEntry.levels.length));
         device.setResourceName(gfxTexture, textureEntry.name);
         device.uploadTextureData(gfxTexture, 0, textureEntry.levels.reverse().map((level) => level.data));
-        const viewerTexture = textureToCanvas(textureEntry);
-        return { gfxTexture, viewerTexture };
+        this.gfxTextures.push(gfxTexture);
+        this.viewerTextures.push({ gfxTexture });
+        this.textureNames.push(textureEntry.name);
     }
 }
 
@@ -93,7 +98,7 @@ class JetSetRadioRenderer implements SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListMain.reset();
     }
 
@@ -189,19 +194,18 @@ class ModelCache {
     public textureHolder = new PVRTextureHolder();
     private archiveCache = new Map<string, AFS.AFS>();
     private archivePromiseCache = new Map<string, Promise<AFS.AFS>>();
+    private actionData: NjsActionData[] = [];
     private texOpaqueMagenta: GfxTexture;
-    private texOpaqueYellow: GfxTexture;
     private texOpaqueWhite: GfxTexture;
 
-    constructor(public device: GfxDevice, public cache: GfxRenderCache, private dataFetcher: DataFetcher, private stageData: StageData) {
-        this.cache = new GfxRenderCache(device);
+    constructor(public device: GfxDevice, public renderCache: GfxRenderCache, private dataFetcher: DataFetcher, private stageData: StageData) {
+        this.renderCache = new GfxRenderCache(device);
 
         this.texOpaqueMagenta = makeSolidColorTexture2D(device, Magenta);
-        this.texOpaqueYellow = makeSolidColorTexture2D(device, Yellow);
         this.texOpaqueWhite = makeSolidColorTexture2D(device, White);
-        this.textureHolder.setTextureOverride('_magenta', { gfxTexture: this.texOpaqueMagenta, width: 1, height: 1, flipY: false });
-        this.textureHolder.setTextureOverride('_yellow', { gfxTexture: this.texOpaqueYellow, width: 1, height: 1, flipY: false });
-        this.textureHolder.setTextureOverride('_white', { gfxTexture: this.texOpaqueWhite, width: 1, height: 1, flipY: false });
+
+        this.textureHolder.texMappingMagenta.gfxTexture = this.texOpaqueMagenta;
+        this.textureHolder.texMappingWhite.gfxTexture = this.texOpaqueWhite;
     }
 
     public waitForLoad(): Promise<void> {
@@ -250,7 +254,7 @@ class ModelCache {
             const texData = this.stageData.TexlistData.Textures[textureIndex];
             const txpData = this.getAFSRef(texData);
             const tex = parseTXPTex(txpData, texData.Offset, textureIndex);
-            this.textureHolder.addTextures(this.device, [tex]);
+            this.textureHolder.addTexture(this.device, tex);
         }
     }
 
@@ -262,41 +266,34 @@ class ModelCache {
         return texlist;
     }
 
-    public loadModelData(id: number): NjsActionData {
-        if (this.modelData.has(id))
-            return this.modelData.get(id)!;
-
-        const model = this.stageData.Models[id];
-        //console.warn(`${hexzero0x(id)}`)
-        const binData = this.getAFSRef(model);
-        const stageLoadAddr = this.stageData.BaseAddress;
-        const objects = Ninja.parseNjsObjects(binData, stageLoadAddr, model.Offset);
-        const action: Ninja.NJS_ACTION = { frames: 0, objects, motions: [] };
-        const actionData = new NjsActionData(this.device, this.cache, action, 0);
-        actionData.texlist = this.loadTexlistIndex(model.TexlistIndex);
-        this.modelData.set(id, actionData);
-        return actionData;
-    }
-
     public loadFromModelData(dat: ModelData) {
         const model = dat;
         const binData = this.getAFSRef(model);
         const stageLoadAddr = this.stageData.BaseAddress;
         const objects = Ninja.parseNjsObjects(binData, stageLoadAddr, model.Offset);
         const action: Ninja.NJS_ACTION = { frames: 0, objects, motions: [] };
-        const actionData = new NjsActionData(this.device, this.cache, action, 0);
+        const actionData = new NjsActionData(this.device, this.renderCache, action, 0);
         actionData.texlist = this.loadTexlistIndex(model.TexlistIndex);
+        this.actionData.push(actionData);
+        return actionData;
+    }
+
+    public loadModelData(id: number): NjsActionData {
+        if (this.modelData.has(id))
+            return this.modelData.get(id)!;
+
+        const actionData = this.loadFromModelData(this.stageData.Models[id]);
+        this.modelData.set(id, actionData);
         return actionData;
     }
 
     public destroy(device: GfxDevice): void {
-        this.cache.destroy();
+        this.renderCache.destroy();
         this.textureHolder.destroy(device);
         device.destroyTexture(this.texOpaqueMagenta);
-        device.destroyTexture(this.texOpaqueYellow);
         device.destroyTexture(this.texOpaqueWhite);
-        for (const v of this.modelData.values())
-            v.destroy(device);
+        for (let i = 0; i < this.actionData.length; i++)
+            this.actionData[i].destroy(device);
     }
 }
 
@@ -316,7 +313,7 @@ class JetSetRadioSceneDesc implements SceneDesc {
         for (let i = 0; i < stageData.Objects.length; i++) {
             const object = stageData.Objects[i];
             const modelData = modelCache.loadModelData(object.ModelID);
-            const actionInstance = new NjsActionInstance(modelCache.cache, modelData, modelData.texlist, modelCache.textureHolder);
+            const actionInstance = new NjsActionInstance(modelCache.renderCache, modelData, modelData.texlist, modelCache.textureHolder);
             actionInstance.modelID = object.ModelID;
             const modelMatrix = mat4.create();
             mat4.fromTranslation(modelMatrix, object.Translation);
@@ -331,7 +328,7 @@ class JetSetRadioSceneDesc implements SceneDesc {
         if (stageData.Skybox !== null) {
             for (const mesh of stageData.Skybox.Meshes) {
                 const modelDataOuter = modelCache.loadFromModelData(mesh);
-                const actionInstanceOuter = new NjsActionInstance(modelCache.cache, modelDataOuter, modelDataOuter.texlist, modelCache.textureHolder);
+                const actionInstanceOuter = new NjsActionInstance(modelCache.renderCache, modelDataOuter, modelDataOuter.texlist, modelCache.textureHolder);
                 renderer.actions.push(actionInstanceOuter);
             }
         }

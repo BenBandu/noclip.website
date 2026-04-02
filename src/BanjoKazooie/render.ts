@@ -1,26 +1,24 @@
-import * as Viewer from '../viewer.js';
-import * as RDP from '../Common/N64/RDP.js';
-import { DeviceProgram } from "../Program.js";
-import { ACMUX, CCMUX, CombineParams } from '../Common/N64/RDP.js';
-import { getImageFormatString, Vertex, DrawCall, RSP_Geometry, RSPSharedOutput, translateCullMode } from "./f3dex.js";
-import { GfxDevice, GfxFormat, GfxTexture, GfxSampler, GfxBuffer, GfxBufferUsage, GfxInputLayout, GfxVertexAttributeDescriptor, GfxVertexBufferFrequency, GfxBindingLayoutDescriptor, GfxBlendMode, GfxBlendFactor, GfxCullMode, GfxMegaStateDescriptor, GfxProgram, GfxBufferFrequencyHint, GfxInputLayoutBufferDescriptor, makeTextureDescriptor2D, GfxVertexBufferDescriptor, GfxIndexBufferDescriptor } from "../gfx/platform/GfxPlatform.js";
-import { makeStaticDataBuffer } from '../gfx/helpers/BufferHelpers.js';
-import { assert, nArray, align, assertExists } from '../util.js';
-import { fillMatrix4x4, fillMatrix4x3, fillMatrix4x2, fillVec4, fillVec4v } from '../gfx/helpers/UniformBufferHelpers.js';
-import { mat4, vec3, vec4, vec2 } from 'gl-matrix';
+import { mat4, vec2, vec3, vec4 } from 'gl-matrix';
 import { computeViewMatrix, computeViewMatrixSkybox } from '../Camera.js';
-import { TextureMapping } from '../TextureHolder.js';
-import { GfxRenderInstManager, setSortKeyDepthKey, setSortKeyDepth } from '../gfx/render/GfxRenderInstManager.js';
-import { GfxRenderCache } from '../gfx/render/GfxRenderCache.js';
 import { TextFilt } from '../Common/N64/Image.js';
-import { Geometry, VertexAnimationEffect, VertexEffectType, GeoNode, Bone, AnimationSetup, TextureAnimationSetup, GeoFlags, isSelector, isSorter } from './geo.js';
-import { clamp, lerp, MathConstants, Vec3Zero, Vec3UnitY, scaleMatrix, calcBillboardMatrix, CalcBillboardFlags } from '../MathHelpers.js';
-import { setAttachmentStateSimple } from '../gfx/helpers/GfxMegaStateDescriptorHelpers.js';
-import { Flipbook, LoopMode, ReverseMode, MirrorMode, FlipbookMode } from './flipbook.js';
+import * as RDP from '../Common/N64/RDP.js';
+import { ACMUX, CCMUX, CombineParams } from '../Common/N64/RDP.js';
 import { calcTextureMatrixFromRSPState } from '../Common/N64/RSP.js';
-import { convertToCanvas } from '../gfx/helpers/TextureConversionHelpers.js';
-import ArrayBufferSlice from '../ArrayBufferSlice.js';
+import { CalcBillboardFlags, calcBillboardMatrix, clamp, lerp, MathConstants, scaleMatrix, Vec3UnitY, Vec3Zero } from '../MathHelpers.js';
+import { DeviceProgram } from "../Program.js";
+import { TextureMapping } from '../TextureHolder.js';
+import { createBufferFromData } from '../gfx/helpers/BufferHelpers.js';
+import { setAttachmentStateSimple } from '../gfx/helpers/GfxMegaStateDescriptorHelpers.js';
 import { GfxShaderLibrary } from '../gfx/helpers/GfxShaderLibrary.js';
+import { fillMatrix4x2, fillMatrix4x3, fillMatrix4x4, fillVec4, fillVec4v } from '../gfx/helpers/UniformBufferHelpers.js';
+import { GfxBindingLayoutDescriptor, GfxBlendFactor, GfxBlendMode, GfxBuffer, GfxBufferFrequencyHint, GfxBufferUsage, GfxCullMode, GfxDevice, GfxFormat, GfxIndexBufferDescriptor, GfxInputLayout, GfxInputLayoutBufferDescriptor, GfxMegaStateDescriptor, GfxProgram, GfxSampler, GfxTexture, GfxVertexAttributeDescriptor, GfxVertexBufferDescriptor, GfxVertexBufferFrequency } from "../gfx/platform/GfxPlatform.js";
+import { GfxRenderCache } from '../gfx/render/GfxRenderCache.js';
+import { GfxRenderInstManager, setSortKeyDepth, setSortKeyDepthKey } from '../gfx/render/GfxRenderInstManager.js';
+import { assert, assertExists, nArray } from '../util.js';
+import * as Viewer from '../viewer.js';
+import { DrawCall, RSP_Geometry, RSPSharedOutput, translateCullMode, Vertex } from "./f3dex.js";
+import { Flipbook, FlipbookMode, LoopMode, MirrorMode, ReverseMode } from './flipbook.js';
+import { AnimationSetup, Bone, GeoFlags, Geometry, GeoNode, isSelector, isSorter, TextureAnimationSetup, VertexAnimationEffect, VertexEffectType } from './geo.js';
 
 export class F3DEX_Program extends DeviceProgram {
     public static a_Position = 0;
@@ -32,9 +30,10 @@ export class F3DEX_Program extends DeviceProgram {
     public static ub_CombineParams = 2;
 
     public override both = `
-precision mediump float;
+precision highp float;
 
 ${GfxShaderLibrary.MatrixLibrary}
+${GfxShaderLibrary.saturate}
 
 layout(std140) uniform ub_SceneParams {
     Mat4x4 u_Projection;
@@ -42,17 +41,21 @@ layout(std140) uniform ub_SceneParams {
     #ifdef TEXTURE_GEN
         vec4 u_LookAtVectors[2];
     #endif
-    #ifdef PARAMETERIZED_LIGHTING
-        vec4 u_DiffuseColor[${this.G_MW_NUMLIGHT}];
-        vec4 u_DiffuseDirection[${this.G_MW_NUMLIGHT}];
-        vec4 u_AmbientColor;
-    #endif
 #endif
 };
 
 layout(std140) uniform ub_DrawParams {
     Mat3x4 u_BoneMatrix[BONE_MATRIX_COUNT];
     Mat2x4 u_TexMatrix[2];
+#ifdef PARAMETERIZED_LIGHTING
+    vec4 u_DiffuseColor[${this.G_MW_NUMLIGHT}];
+    vec4 u_DiffuseDirection[${this.G_MW_NUMLIGHT}];
+    vec4 u_AmbientColor;
+#endif
+#ifdef USE_FOG
+    vec4 u_FogParam;
+    vec4 u_FogColor;
+#endif
 };
 
 layout(std140) uniform ub_CombineParameters {
@@ -65,9 +68,12 @@ layout(std140) uniform ub_CombineParameters {
 #endif
 };
 
+#define u_IsWireframeEnabled (u_MiscComb.w)
+
 uniform sampler2D u_Texture0;
 uniform sampler2D u_Texture1;
 
+varying float v_FogFactor;
 varying vec4 v_Color;
 varying vec4 v_TexCoord;
 
@@ -100,6 +106,10 @@ void main() {
     vec3 t_PositionView = t_BoneMatrix * vec4(a_Position.xyz, 1.0);
     gl_Position = UnpackMatrix(u_Projection) * vec4(t_PositionView, 1.0);
     v_Color = t_One;
+
+#ifdef USE_FOG
+    v_FogFactor = saturate(((-t_PositionView.z) - u_FogParam.x) / (u_FogParam.y - u_FogParam.x));
+#endif
 
 #ifdef USE_VERTEX_COLOR
     v_Color = a_Color;
@@ -201,7 +211,7 @@ void main() {
 
         if (alphaThreshold > 0) {
             return `
-    if (t_Color.a < ${alphaThreshold})
+    if (t_Color.a < ${alphaThreshold} && (u_IsWireframeEnabled == 0.0))
         discard;
 `;
         } else {
@@ -321,20 +331,18 @@ void main() {
 
 ${this.generateAlphaTest()}
 
+#ifdef USE_FOG
+    t_Color.rgb = mix(t_Color.rgb, u_FogColor.xyz, v_FogFactor);
+#endif
+
+    if (u_IsWireframeEnabled > 0.0) {
+        t_Color.a = 1.0;
+    }
+
     gl_FragColor = t_Color;
 }
 `;
     }
-}
-
-export function textureToCanvas(texture: RDP.Texture): Viewer.Texture {
-    const canvas = convertToCanvas(ArrayBufferSlice.fromView(texture.pixels), texture.width, texture.height);
-    canvas.title = texture.name;
-
-    const surfaces = [ canvas ];
-    const extraInfo = new Map<string, string>();
-    extraInfo.set('Format', getImageFormatString(texture.tile.fmt, texture.tile.siz));
-    return { name: texture.name, surfaces, extraInfo };
 }
 
 function makeVertexBufferData(v: Vertex[]): Float32Array {
@@ -495,11 +503,11 @@ export class RenderData {
         }
 
         this.vertexBufferData = makeVertexBufferData(sharedOutput.vertices);
-        this.vertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, this.vertexBufferData.buffer);
+        this.vertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, this.vertexBufferData.buffer);
         assert(sharedOutput.vertices.length <= 0xFFFFFFFF);
 
         const indexBufferData = new Uint32Array(sharedOutput.indices);
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, indexBufferData.buffer);
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, indexBufferData.buffer);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: F3DEX_Program.a_Position, bufferIndex: 0, format: GfxFormat.F32_RGBA, bufferByteOffset: 0*0x04, },
@@ -517,8 +525,8 @@ export class RenderData {
             vertexAttributeDescriptors,
         });
 
-        this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer, byteOffset: 0 }];
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0 };
+        this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer }];
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
     }
 
     public destroy(device: GfxDevice): void {
@@ -678,7 +686,7 @@ class DrawCallInstance {
     }
 }
 
-export const enum AnimationTrackType {
+export enum AnimationTrackType {
     RotationX,
     RotationY,
     RotationZ,
@@ -969,7 +977,7 @@ class GeoNodeRenderer {
     }
 }
 
-const enum ObjectFlags {
+enum ObjectFlags {
     FinalLayer   = 0x00400000,
     Translucent  = 0x00020000,
     EarlyOpaque  = 0x00000400,
@@ -978,7 +986,7 @@ const enum ObjectFlags {
     Blink        = 0x00000100,
 }
 
-export const enum BKLayer {
+export enum BKLayer {
     Early,
     Opaque,
     LevelXLU,
@@ -997,7 +1005,7 @@ export function layerFromFlags(flags: number): BKLayer {
     return BKLayer.Opaque;
 }
 
-const enum BlinkState {
+enum BlinkState {
     Open,
     Closing,
     Opening,
@@ -1056,7 +1064,7 @@ class TextureAnimator {
     }
 }
 
-export const enum AnimationMode {
+export enum AnimationMode {
     None,
     Once,
     Loop,
@@ -1135,12 +1143,12 @@ export class GeometryRenderer {
             // make a copy for this renderer
             this.vertexBufferData = new Float32Array(this.geometryData.renderData.vertexBufferData);
             this.vertexBuffer = device.createBuffer(
-                align(this.vertexBufferData.byteLength, 4) / 4,
+                this.vertexBufferData.byteLength,
                 GfxBufferUsage.Vertex,
                 GfxBufferFrequencyHint.Dynamic
             );
 
-            this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer, byteOffset: 0, }];
+            this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer }];
 
             // allow the render data to destroy the copies later
             this.geometryData.renderData.dynamicBufferCopies.push(this.vertexBuffer);
@@ -1627,6 +1635,11 @@ export class FlipbookRenderer {
         if (!this.visible)
             return;
 
+        mat4.getTranslation(scratchVec3, this.modelMatrix);
+        const radius = Math.max(this.flipbookData.flipbook.width, this.flipbookData.flipbook.height) / 2;
+        if (!viewerInput.camera.frustum.containsSphere(scratchVec3, radius))
+            return;
+
         if (this.gfxProgram === null)
             this.gfxProgram = renderInstManager.gfxRenderCache.createProgram(this.program);
 
@@ -1644,15 +1657,11 @@ export class FlipbookRenderer {
         vec3.sub(flipbookScratch[0], flipbookScratch[0], flipbookScratch[1]);
         renderInst.sortKey = setSortKeyDepth(this.sortKeyBase, vec3.len(flipbookScratch[0]));
 
-        let offs = renderInst.allocateUniformBuffer(F3DEX_Program.ub_SceneParams, 16);
-        const scene = renderInst.mapUniformBufferF32(F3DEX_Program.ub_SceneParams);
-        offs += fillMatrix4x4(scene, offs, viewerInput.camera.projectionMatrix);
-
         renderInst.setGfxProgram(this.gfxProgram);
         renderInst.setSamplerBindingsFromTextureMappings(texMappingScratch);
         renderInst.setDrawCount(6);
 
-        offs = renderInst.allocateUniformBuffer(F3DEX_Program.ub_DrawParams, 12 + 8 * 2);
+        let offs = renderInst.allocateUniformBuffer(F3DEX_Program.ub_DrawParams, 12 + 8 * 2);
         const draw = renderInst.mapUniformBufferF32(F3DEX_Program.ub_DrawParams);
 
         computeViewMatrix(viewMatrixScratch, viewerInput.camera);

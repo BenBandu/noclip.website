@@ -11,7 +11,7 @@ import { Endianness } from "../endian.js";
 import { MathConstants } from "../MathHelpers.js";
 import { fopAc_ac_c } from "./f_op_actor.js";
 
-export const enum cBgW_Flags {
+export enum cBgW_Flags {
     None      = 0x00,
     Dynamic   = 0x01,
     NoVtxTbl  = 0x10,
@@ -46,7 +46,7 @@ class cBgD__Tre_t {
     public childBlk: Int16Array;
 }
 
-const enum dBgW__PassFlag {
+enum dBgW__PassFlag {
     None             = 0x00,
     CamThrough       = 0x01,
     ObjThrough       = 0x02,
@@ -180,11 +180,15 @@ class cBgW_NodeTree {
     public aabb = new AABB();
 }
 
-class cBgS_PolyInfo {
+export class cBgS_PolyInfo {
     public triIdx: number = -1;
     public bgIdx: number = -1;
     public bgW: cBgW | null = null;
     public processId: number = -1;
+
+    public ChkSetInfo(): boolean {
+        return !(this.triIdx === 0xFFFF || this.bgIdx === 0x100);
+    }
 
     public Reset(): void {
         this.triIdx = -1;

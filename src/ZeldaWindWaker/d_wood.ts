@@ -4,16 +4,13 @@ import ArrayBufferSlice from '../ArrayBufferSlice.js';
 import { colorCopy, colorFromRGBA } from '../Color.js';
 import { BTI_Texture, BTIData } from '../Common/JSYSTEM/JUTTexture.js';
 import { scaleMatrix, setMatrixAxis, setMatrixTranslation } from '../MathHelpers.js';
-import { TextureMapping } from '../TextureHolder.js';
 import { Endianness } from '../endian.js';
-import { GfxBufferCoalescerCombo } from '../gfx/helpers/BufferHelpers.js';
 import { GfxDevice } from '../gfx/platform/GfxPlatform.js';
 import { nArray } from '../gfx/platform/GfxPlatformUtil.js';
 import { GfxRendererLayer, GfxRenderInstManager, makeSortKey } from '../gfx/render/GfxRenderInstManager.js';
 import { compileVtxLoader, DisplayListRegisters, displayListRegistersInitGX, displayListRegistersRun, getAttributeByteSize, GX_Array, GX_VtxAttrFmt, GX_VtxDesc } from '../gx/gx_displaylist.js';
 import * as GX from '../gx/gx_enum.js';
-import { parseMaterial } from '../gx/gx_material.js';
-import { ColorKind, DrawParams, GXMaterialHelperGfx, GXShapeHelperGfx, loadedDataCoalescerComboGfx, MaterialParams } from '../gx/gx_render.js';
+import { ColorKind, DrawParams, GXMaterialHelperGfx, GXTextureMapping, MaterialParams } from '../gx/gx_render.js';
 import { assert } from '../util.js';
 import { ViewerRenderInput } from '../viewer.js';
 import { dGlobals } from './Main.js';
@@ -22,18 +19,20 @@ import { dBgS_GndChk } from './d_bg.js';
 import { dKy_GxFog_set } from './d_kankyo.js';
 import { dKyw_get_wind_pow, dKyw_get_wind_vec } from './d_kankyo_wether.js';
 import { mDoMtx_XrotM, mDoMtx_YrotM, mDoMtx_YrotS, MtxTrans } from './m_do_mtx.js';
+import { dDlst_BasicShape_c } from './d_drawlist.js';
+import { GXMaterialBuilder } from '../gx/GXMaterialBuilder.js';
 
 //-----------------------------------------
 // Types
 //-----------------------------------------
-const enum UnitState_e {
+enum UnitState_e {
     Inactive = 0,
     Active = 1 << 0,
     IsFrustumCulled = 1 << 1,
     IsCut = 1 << 2,
 }
 
-const enum AnimMode_e {
+enum AnimMode_e {
     Cut = 0,      // Chopping down
     PushInto = 1, // Attacked or collided with, but not chopped
     PushBack = 2, // Second half of PushInto, returning to normal
@@ -44,7 +43,7 @@ const enum AnimMode_e {
     _Max
 };
 
-const enum AttrSway_e {
+enum AttrSway_e {
     Light,
     Medium,
     Strong,
@@ -209,19 +208,17 @@ function createTexture(r: DisplayListRegisters, data: ArrayBufferSlice, name: st
 }
 
 class WoodModel {
-    public shadowTextureMapping = nArray(1, () => new TextureMapping());
+    public shadowTextureMapping = nArray(1, () => new GXTextureMapping());
     public shadowTextureData: BTIData;
     public shadowMaterial: GXMaterialHelperGfx;
 
-    public bushTextureMapping = new TextureMapping();
+    public bushTextureMapping = new GXTextureMapping();
     public bushTextureData: BTIData;
     public bushMaterial: GXMaterialHelperGfx;
 
-    public shapeMain: GXShapeHelperGfx;
-    public shapeTrunk: GXShapeHelperGfx;
-    public shapeShadow: GXShapeHelperGfx;
-
-    public bufferCoalescer: GfxBufferCoalescerCombo;
+    public shapeMain: dDlst_BasicShape_c;
+    public shapeTrunk: dDlst_BasicShape_c;
+    public shapeShadow: dDlst_BasicShape_c;
 
     constructor(globals: dGlobals) {
         const device = globals.modelCache.device, cache = globals.renderer.renderCache;
@@ -247,12 +244,15 @@ class WoodModel {
 
         const matRegisters = new DisplayListRegisters();
 
+        const matBuilder = new GXMaterialBuilder();
+        matBuilder.setFog(GX.FogType.PERSP_LIN, true);
+
         // Shadow material
         displayListRegistersInitGX(matRegisters);
         displayListRegistersRun(matRegisters, l_shadowMatDL);
-        const shadowMat = parseMaterial(matRegisters, 'd_tree::l_shadowMatDL');
+        matBuilder.setFromRegisters(matRegisters);
 
-        this.shadowMaterial = new GXMaterialHelperGfx(shadowMat);
+        this.shadowMaterial = new GXMaterialHelperGfx(matBuilder.finish('d_tree::l_shadowMatDL'));
         const shadowTexture = createTexture(matRegisters, l_Txa_kage_32TEX, 'l_Txa_kage_32TEX');
         this.shadowTextureData = new BTIData(device, cache, shadowTexture);
         this.shadowTextureData.fillTextureMapping(this.shadowTextureMapping[0]);
@@ -271,18 +271,10 @@ class WoodModel {
         // Bush material
         displayListRegistersInitGX(matRegisters);
         displayListRegistersRun(matRegisters, l_matDL);
-
-        const material = parseMaterial(matRegisters, 'd_tree::l_matDL');
-        material.alphaTest.op = GX.AlphaOp.OR;
-        material.alphaTest.compareA = GX.CompareType.GREATER;
-        material.alphaTest.compareB = GX.CompareType.GREATER;
-        material.alphaTest.referenceA = kAlphaCutoff;
-        material.alphaTest.referenceB = kAlphaCutoff;
-        material.hasDynamicAlphaTest = true;
-        material.ropInfo.fogType = GX.FogType.PERSP_LIN;
-        material.ropInfo.fogAdjEnabled = true;
-        material.hasFogBlock = true;
-        this.bushMaterial = new GXMaterialHelperGfx(material);
+        matBuilder.setFromRegisters(matRegisters);
+        matBuilder.setAlphaCompare(GX.CompareType.GREATER, kAlphaCutoff, GX.AlphaOp.OR, GX.CompareType.GREATER, kAlphaCutoff);
+        matBuilder.setDynamicAlphaTest(true);
+        this.bushMaterial = new GXMaterialHelperGfx(matBuilder.finish('d_tree::l_matDL'));
 
         const bushTexture = createTexture(matRegisters, l_Txa_swood_bTEX, 'l_Txa_swood_bTEX');
         this.bushTextureData = new BTIData(device, cache, bushTexture);
@@ -302,20 +294,15 @@ class WoodModel {
         const vtx_l_Oba_swood_bDL = vtxLoader.runVertices(vtxArrays, l_Oba_swood_bDL);
         const vtx_l_Oba_swood_b_cutDL = vtxLoader.runVertices(vtxArrays, l_Oba_swood_b_cutDL);
 
-        // Coalesce all VBs and IBs into single buffers and upload to the GPU
-        this.bufferCoalescer = loadedDataCoalescerComboGfx(device, [vtx_l_Oba_swood_bDL, vtx_l_Oba_swood_b_cutDL, vtx_l_shadowDL]);
-
-        // Build an input layout and input state from the vertex layout and data
-        const b = this.bufferCoalescer.coalescedBuffers;
-
-        // Build an input layout and input state from the vertex layout and data
-        this.shapeMain = new GXShapeHelperGfx(device, cache, b[0].vertexBuffers, b[0].indexBuffer, vtxLoader.loadedVertexLayout, vtx_l_Oba_swood_bDL);
-        this.shapeTrunk = new GXShapeHelperGfx(device, cache, b[1].vertexBuffers, b[1].indexBuffer, vtxLoader.loadedVertexLayout, vtx_l_Oba_swood_b_cutDL);
-        this.shapeShadow = new GXShapeHelperGfx(device, cache, b[2].vertexBuffers, b[2].indexBuffer, shadowVtxLoader.loadedVertexLayout, vtx_l_shadowDL);
+        this.shapeMain = new dDlst_BasicShape_c(cache, vtxLoader.loadedVertexLayout, vtx_l_Oba_swood_bDL);
+        this.shapeTrunk = new dDlst_BasicShape_c(cache, vtxLoader.loadedVertexLayout, vtx_l_Oba_swood_b_cutDL);
+        this.shapeShadow = new dDlst_BasicShape_c(cache, shadowVtxLoader.loadedVertexLayout, vtx_l_shadowDL);
     }
 
     public destroy(device: GfxDevice): void {
-        this.bufferCoalescer.destroy(device);
+        this.shapeMain.destroy(device);
+        this.shapeTrunk.destroy(device);
+        this.shapeShadow.destroy(device);
         this.shadowTextureData.destroy(device);
         this.bushTextureData.destroy(device);
     }

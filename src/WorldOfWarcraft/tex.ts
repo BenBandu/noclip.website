@@ -1,10 +1,12 @@
-import { WowBlp } from "../../rust/pkg/noclip_support";
+import { WowBlp } from "noclip-rust-support";
 import { TextureMapping } from "../TextureHolder.js";
 import { makeSolidColorTexture2D } from "../gfx/helpers/TextureHelpers.js";
 import {
     GfxDevice,
     GfxMipFilterMode,
+    GfxSampler,
     GfxTexFilterMode,
+    GfxTexture,
     GfxTextureDescriptor,
     GfxTextureDimension,
     GfxTextureUsage,
@@ -12,7 +14,6 @@ import {
     makeTextureDescriptor2D,
 } from "../gfx/platform/GfxPlatform.js";
 import { GfxFormat } from "../gfx/platform/GfxPlatformFormat.js";
-import { GfxSampler, GfxTexture } from "../gfx/platform/GfxPlatformImpl.js";
 import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
 import { rust } from "../rustlib.js";
 

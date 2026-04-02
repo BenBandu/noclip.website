@@ -12,11 +12,10 @@ import ArrayBufferSlice from '../ArrayBufferSlice.js';
 import { Camera, computeViewMatrix, computeViewMatrixSkybox } from '../Camera.js';
 import { Color, colorAdd, colorClamp, colorCopy, colorMult, colorNewCopy, colorNewFromRGBA, OpaqueBlack, TransparentBlack } from '../Color.js';
 import { drawWorldSpaceLine, getDebugOverlayCanvas2D } from '../DebugJunk.js';
-import { makeStaticDataBuffer } from '../gfx/helpers/BufferHelpers.js';
 import { GfxShaderLibrary } from '../gfx/helpers/GfxShaderLibrary.js';
 import { reverseDepthForDepthOffset } from '../gfx/helpers/ReversedDepthHelpers.js';
 import { fillColor, fillMatrix4x3, fillMatrix4x4, fillVec4, fillVec4v } from '../gfx/helpers/UniformBufferHelpers.js';
-import { GfxBuffer, GfxBufferUsage, GfxCompareMode, GfxDevice, GfxFormat, GfxIndexBufferDescriptor, GfxInputLayout, GfxInputLayoutBufferDescriptor, GfxMipFilterMode, GfxProgram, GfxSampler, GfxTexFilterMode, GfxTexture, GfxTextureDescriptor, GfxTextureDimension, GfxTextureUsage, GfxVertexAttributeDescriptor, GfxVertexBufferDescriptor, GfxVertexBufferFrequency, GfxWrapMode, makeTextureDescriptor2D } from '../gfx/platform/GfxPlatform.js';
+import { GfxBuffer, GfxBufferFrequencyHint, GfxBufferUsage, GfxCompareMode, GfxDevice, GfxFormat, GfxIndexBufferDescriptor, GfxInputLayout, GfxInputLayoutBufferDescriptor, GfxMipFilterMode, GfxProgram, GfxSampler, GfxTexFilterMode, GfxTexture, GfxTextureDescriptor, GfxTextureDimension, GfxTextureUsage, GfxVertexAttributeDescriptor, GfxVertexBufferDescriptor, GfxVertexBufferFrequency, GfxWrapMode, makeTextureDescriptor2D } from '../gfx/platform/GfxPlatform.js';
 import { getFormatByteSize, setFormatCompFlags } from '../gfx/platform/GfxPlatformFormat.js';
 import { GfxRenderCache } from '../gfx/render/GfxRenderCache.js';
 import { GfxRendererLayer, GfxRenderInst, GfxRenderInstManager, makeSortKey } from '../gfx/render/GfxRenderInstManager.js';
@@ -26,13 +25,14 @@ import { TextureMapping } from '../TextureHolder.js';
 import { assert, nArray } from '../util.js';
 import { ColorAnimType } from './cmab.js';
 import { BumpMode, FresnelSelector, LightingConfig, LutInput, TexCoordConfig } from './cmb.js';
+import { createBufferFromData } from '../gfx/helpers/BufferHelpers.js';
 
 interface DMPMaterialHacks {
     texturesEnabled: boolean;
     vertexColorsEnabled: boolean;
 }
 
-const enum MatLutType {
+enum MatLutType {
     Distribution0,
     Distribution1,
     Fresnel,
@@ -393,7 +393,7 @@ uniform samplerCube u_Cubemap;
 
     private generateFragmentShader(): void {
         this.frag = `
-precision mediump float;
+precision highp float;
 ${DMPProgram.BindingsDefinition}
 ${GfxShaderLibrary.saturate}
 
@@ -453,7 +453,7 @@ class OoT3DProgram extends DMPProgram {
         super(material, materialHacks);
 
         this.vert = `
-precision mediump float;
+precision highp float;
 ${DMPProgram.BindingsDefinition}
 ${GfxShaderLibrary.MulNormalMatrix}
 ${GfxShaderLibrary.saturate}
@@ -727,6 +727,7 @@ class MaterialInstance {
 
             const [minFilter, mipFilter] = this.translateTextureFilter(binding.minFilter);
             const [magFilter] = this.translateTextureFilter(binding.magFilter);
+            const isNoMip = binding.minFilter === CMB.TextureFilter.LINEAR || binding.minFilter === CMB.TextureFilter.NEAREST;
 
             const gfxSampler = cache.createSampler({
                 wrapS: this.translateWrapMode(binding.wrapS),
@@ -735,7 +736,7 @@ class MaterialInstance {
                 minFilter,
                 mipFilter,
                 minLOD: 0,
-                maxLOD: 100,
+                maxLOD: isNoMip ? 0 : 100,
             });
             this.gfxSamplers.push(gfxSampler);
 
@@ -751,7 +752,8 @@ class MaterialInstance {
             wrapT: GfxWrapMode.Clamp,
             minFilter: GfxTexFilterMode.Bilinear,
             magFilter: GfxTexFilterMode.Bilinear,
-            mipFilter: GfxMipFilterMode.NoMip,
+            mipFilter: GfxMipFilterMode.Nearest,
+            minLOD: 0, maxLOD: 0,
         });
         this.gfxSamplers.push(lutSampler);
         this.textureMappings[3].gfxSampler = lutSampler;
@@ -968,9 +970,9 @@ class MaterialInstance {
     private translateTextureFilter(filter: CMB.TextureFilter): [GfxTexFilterMode, GfxMipFilterMode] {
         switch (filter) {
         case CMB.TextureFilter.LINEAR:
-            return [GfxTexFilterMode.Bilinear, GfxMipFilterMode.NoMip];
+            return [GfxTexFilterMode.Bilinear, GfxMipFilterMode.Nearest];
         case CMB.TextureFilter.NEAREST:
-            return [GfxTexFilterMode.Bilinear, GfxMipFilterMode.NoMip];
+            return [GfxTexFilterMode.Bilinear, GfxMipFilterMode.Nearest];
         case CMB.TextureFilter.LINEAR_MIPMAP_LINEAR:
             return [GfxTexFilterMode.Bilinear, GfxMipFilterMode.Linear];
         case CMB.TextureFilter.LINEAR_MIPMAP_NEAREST:
@@ -1033,10 +1035,10 @@ class SepdData {
         };
 
         const pushBuffer = (location: number, format: GfxFormat, data: Float32Array, frequency: GfxVertexBufferFrequency) => {
-            const buffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, data.buffer, data.byteOffset, data.byteLength);
+            const buffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, data.buffer, data.byteOffset, data.byteLength);
             const bufferIndex = this.vertexBufferDescriptors.length;
             this.buffers.push(buffer);
-            this.vertexBufferDescriptors.push({ buffer, byteOffset: 0 });
+            this.vertexBufferDescriptors.push({ buffer });
             vertexBufferDescriptors.push({ byteStride: getFormatByteSize(format), frequency });
             vertexAttributeDescriptors.push({ location, format, bufferIndex, bufferByteOffset: 0 });
         };
@@ -1124,11 +1126,11 @@ class SepdData {
             indexBufferOffs += prms.prm.count;
         }
 
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, indexData.buffer);
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, indexData.buffer);
         const indexBufferFormat = GfxFormat.U16_R;
         this.inputLayout = cache.createInputLayout({ vertexAttributeDescriptors, vertexBufferDescriptors, indexBufferFormat });
 
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0 };
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
     }
 
     public destroy(device: GfxDevice): void {

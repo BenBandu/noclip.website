@@ -30,7 +30,7 @@ class DKRRenderer implements Viewer.SceneGfx {
 
     private level: DkrLevel | null = null;
 
-    constructor(device: GfxDevice, private camStart: number[]) {
+    constructor(device: GfxDevice) {
         this.renderHelper = new GfxRenderHelper(device);
     }
 
@@ -67,8 +67,6 @@ class DKRRenderer implements Viewer.SceneGfx {
 
         const builder = this.renderHelper.renderGraph.newGraphBuilder();
 
-        const renderInstManager = this.renderHelper.renderInstManager;
-
         let clearColor = colorNewFromRGBA(0.8, 0.8, 0.8);
         if(!!this.level) {
             clearColor = this.level.getClearColor();
@@ -90,7 +88,7 @@ class DKRRenderer implements Viewer.SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListMain.reset();
     }
 
@@ -158,19 +156,14 @@ class DKRRenderer implements Viewer.SceneGfx {
             }
         }
         panelInfo.elem = panel;
-
-        if(panelInfo.hidden) {
-            panel.setVisible(false);
-        }
-
         return panel;
     }
 
     public createPanels(): Panel[] {
-        return [
-            this.createPanel(DkrControlGlobals.PANEL_RENDER_OPTIONS),
-            this.createPanel(DkrControlGlobals.PANEL_ANIM_CAMERA),
-        ];
+        const renderOptions = this.createPanel(DkrControlGlobals.PANEL_RENDER_OPTIONS);
+        const animCamera = this.createPanel(DkrControlGlobals.PANEL_ANIM_CAMERA);
+        animCamera.setVisible(this.level!.hasCameraAnimation);
+        return [renderOptions, animCamera];
     }
 }
 
@@ -184,27 +177,19 @@ class DKRSceneDesc implements Viewer.SceneDesc {
     }
 
     public async createScene(device: GfxDevice, context: SceneContext): Promise<Viewer.SceneGfx> {
-        if(this.trackParams.animTracks !== null) {
-            DkrControlGlobals.ANIM_TRACK_SELECT.trackSelectOptions = this.trackParams.animTracks;
-            DkrControlGlobals.ANIM_TRACK_SELECT.trackSelectOptionKeys = Object.keys(this.trackParams.animTracks);
-        } else {
-            DkrControlGlobals.ANIM_TRACK_SELECT.trackSelectOptions = {};
-            DkrControlGlobals.ANIM_TRACK_SELECT.trackSelectOptionKeys = Object.keys({});
-        }
-        DkrControlGlobals.ANIM_TRACK_SELECT.selectableChannels = null;
-        DkrControlGlobals.ANIM_TRACK_SELECT.selectedIndex = -1;
-        DkrControlGlobals.ANIM_TRACK_SELECT.selectedIndexUpdated();
-        this.renderer = new DKRRenderer(device, this.trackParams.camStart);
-        new DataManager(context, pathBase, dkrVersion, (dataManager: DataManager) => {
-            this.dataManager = dataManager;
-            const renderCache = this.renderer.renderHelper.renderCache;
-            this.textureCache = new DkrTextureCache(device, renderCache, this.dataManager);
-            this.sprites = new DkrSprites(device, renderCache, this.dataManager);
+        this.renderer = new DKRRenderer(device);
 
-            const level = new DkrLevel(device, this.renderer.renderHelper, this.textureCache, this.id, this.dataManager, this.sprites);
-            this.renderer.setLevel(level);
-        });
-        
+        const renderCache = this.renderer.renderHelper.renderCache;
+
+        this.dataManager = new DataManager(context, pathBase, dkrVersion);
+        await this.dataManager.fetchData();
+
+        this.textureCache = new DkrTextureCache(device, renderCache, this.dataManager);
+        this.sprites = new DkrSprites(device, renderCache, this.dataManager);
+
+        const level = new DkrLevel(device, this.renderer.renderHelper, this.textureCache, this.id, this.dataManager, this.sprites);
+        this.renderer.setLevel(level);
+
         return this.renderer;
     }
 }

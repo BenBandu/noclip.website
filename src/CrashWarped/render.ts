@@ -1,21 +1,19 @@
 
-import { GfxDevice, GfxBuffer, GfxInputLayout, GfxFormat, GfxVertexBufferFrequency, GfxVertexAttributeDescriptor, GfxBufferUsage, GfxWrapMode, GfxTexFilterMode, GfxMipFilterMode, GfxCullMode, GfxCompareMode, GfxProgram, GfxMegaStateDescriptor, GfxBlendMode, GfxBlendFactor, GfxInputLayoutBufferDescriptor, GfxVertexBufferDescriptor, GfxTexture, makeTextureDescriptor2D, GfxIndexBufferDescriptor, GfxBindingLayoutDescriptor } from "../gfx/platform/GfxPlatform.js";
+import { mat4, ReadonlyMat4, ReadonlyVec3, vec3 } from "gl-matrix";
+import { createBufferFromData } from "../gfx/helpers/BufferHelpers.js";
+import { AttachmentStateSimple, setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
+import { GfxShaderLibrary } from "../gfx/helpers/GfxShaderLibrary.js";
+import { fillMatrix4x2, fillMatrix4x3, fillVec3v, fillVec4 } from "../gfx/helpers/UniformBufferHelpers.js";
+import { GfxBindingLayoutDescriptor, GfxBlendFactor, GfxBlendMode, GfxBuffer, GfxBufferFrequencyHint, GfxBufferUsage, GfxCompareMode, GfxCullMode, GfxDevice, GfxFormat, GfxIndexBufferDescriptor, GfxInputLayout, GfxInputLayoutBufferDescriptor, GfxMegaStateDescriptor, GfxMipFilterMode, GfxProgram, GfxTexFilterMode, GfxTexture, GfxVertexAttributeDescriptor, GfxVertexBufferDescriptor, GfxVertexBufferFrequency, GfxWrapMode, makeTextureDescriptor2D } from "../gfx/platform/GfxPlatform.js";
+import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
+import { GfxRenderHelper } from "../gfx/render/GfxRenderHelper.js";
+import { GfxRendererLayer, GfxRenderInstList, GfxRenderInstManager, makeSortKey } from "../gfx/render/GfxRenderInstManager.js";
+import { CalcBillboardFlags, calcBillboardMatrix, getMatrixAxisX, getMatrixTranslation, invlerp, Mat4Identity, transformVec3Mat4w0 } from "../MathHelpers.js";
 import { DeviceProgram } from "../Program.js";
+import { TextureMapping } from "../TextureHolder.js";
+import { assertExists, nArray } from "../util.js";
 import * as Viewer from "../viewer.js";
 import * as BIN from "./bin.js";
-import { makeStaticDataBuffer } from "../gfx/helpers/BufferHelpers.js";
-import { mat4, ReadonlyMat4, ReadonlyVec3, vec3 } from "gl-matrix";
-import { fillMatrix4x2, fillMatrix4x3, fillVec3v, fillVec4 } from "../gfx/helpers/UniformBufferHelpers.js";
-import { TextureMapping } from "../TextureHolder.js";
-import { GfxRenderInstList, GfxRenderInstManager, GfxRendererLayer, makeSortKey } from "../gfx/render/GfxRenderInstManager.js";
-import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
-import { AttachmentStateSimple, setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
-import { assert, assertExists, nArray } from "../util.js";
-import { convertToCanvas } from "../gfx/helpers/TextureConversionHelpers.js";
-import ArrayBufferSlice from "../ArrayBufferSlice.js";
-import { CalcBillboardFlags, calcBillboardMatrix, getMatrixAxisX, getMatrixTranslation, invlerp, Mat4Identity, transformVec3Mat4w0 } from "../MathHelpers.js";
-import { GfxRenderHelper } from "../gfx/render/GfxRenderHelper.js";
-import { GfxShaderLibrary } from "../gfx/helpers/GfxShaderLibrary.js";
 export class WarpedProgram extends DeviceProgram {
     public static a_Position = 0;
     public static a_Color = 1;
@@ -26,7 +24,7 @@ export class WarpedProgram extends DeviceProgram {
     public static ub_TexParams = 2;
 
     public override both = `
-precision mediump float;
+precision highp float;
 
 ${GfxShaderLibrary.MatrixLibrary}
 
@@ -217,21 +215,12 @@ export class TextureData {
         device.uploadTextureData(gfxTexture, 0, [page.data]);
         this.gfxTexture = gfxTexture;
 
-        this.viewerTexture = textureToCanvas(page);
+        this.viewerTexture = this;
     }
 
     public destroy(device: GfxDevice): void {
         device.destroyTexture(this.gfxTexture);
     }
-}
-
-function textureToCanvas(texture: BIN.TexturePage): Viewer.Texture {
-    const canvas = convertToCanvas(ArrayBufferSlice.fromView(texture.data), texture.width, texture.height, GfxFormat.U8_RGBA_NORM);
-    canvas.title = texture.name;
-
-    const surfaces = [canvas];
-    const extraInfo = new Map<string, string>();
-    return { name: texture.name, surfaces, extraInfo };
 }
 
 const additiveBlend: Partial<AttachmentStateSimple> = {
@@ -690,7 +679,7 @@ export class AnimatedMeshData extends ModelData {
         for (let dc of mesh.drawCalls)
             this.drawCalls.push(new DrawCallInstance(cache, -1, dc, this.vertexTextureMapping));
 
-        this.attrBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, assertExists(mesh.attrData).buffer);
+        this.attrBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, assertExists(mesh.attrData).buffer);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: WarpedProgram.a_Position, bufferIndex: 0, bufferByteOffset: 5 * 4, format: GfxFormat.F32_R },
@@ -700,12 +689,12 @@ export class AnimatedMeshData extends ModelData {
         const vertexLayoutDescriptors: GfxInputLayoutBufferDescriptor[] = [
             { byteStride: 4 * (1 + 3 + 2), frequency: GfxVertexBufferFrequency.PerVertex },
         ];
-        this.vertexBufferDescriptors = [{ buffer: this.attrBuffer, byteOffset: 0 }];
+        this.vertexBufferDescriptors = [{ buffer: this.attrBuffer }];
 
         const indexData = this.mesh.indexData;
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, Uint16Array.from(indexData).buffer);
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, Uint16Array.from(indexData).buffer);
         const indexBufferFormat = GfxFormat.U16_R;
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0, };
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
 
         this.inputLayout = cache.createInputLayout({ vertexAttributeDescriptors, vertexBufferDescriptors: vertexLayoutDescriptors, indexBufferFormat });
     }
@@ -740,7 +729,7 @@ export class SimpleMeshData extends ModelData {
         for (let dc of mesh.drawCalls)
             this.drawCalls.push(new DrawCallInstance(cache, levelIndex, dc, null));
 
-        this.vertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, mesh.vertexData.buffer);
+        this.vertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, mesh.vertexData.buffer);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: WarpedProgram.a_Position, bufferIndex: 0, bufferByteOffset: 5 * 4, format: GfxFormat.F32_RGB },
@@ -750,12 +739,12 @@ export class SimpleMeshData extends ModelData {
         const vertexLayoutDescriptors: GfxInputLayoutBufferDescriptor[] = [
             { byteStride: 4 * (3 + 3 + 2), frequency: GfxVertexBufferFrequency.PerVertex },
         ];
-        this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer, byteOffset: 0, }];
+        this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer }];
 
         const indexData = this.mesh.indexData;
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, Uint16Array.from(indexData).buffer);
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, Uint16Array.from(indexData).buffer);
         const indexBufferFormat = GfxFormat.U16_R;
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0, };
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
 
         this.inputLayout = cache.createInputLayout({ vertexAttributeDescriptors, vertexBufferDescriptors: vertexLayoutDescriptors, indexBufferFormat });
     }
@@ -766,7 +755,7 @@ export class SimpleMeshData extends ModelData {
     }
 }
 
-export const enum RenderMode {
+export enum RenderMode {
     DEFAULT,
     FOG,
     XLU,
@@ -885,7 +874,7 @@ export class QuadListData {
             this.drawCalls.push(curr);
         }
 
-        this.vertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, data.vertexData.buffer);
+        this.vertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, data.vertexData.buffer);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: WarpedProgram.a_Position, bufferIndex: 0, bufferByteOffset: 0, format: GfxFormat.F32_RGB },
@@ -895,12 +884,12 @@ export class QuadListData {
         const vertexLayoutDescriptors: GfxInputLayoutBufferDescriptor[] = [
             { byteStride: 4 * (3 + 3 + 2), frequency: GfxVertexBufferFrequency.PerVertex },
         ];
-        this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer, byteOffset: 0, }];
+        this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer }];
 
         const indexData = this.info.data.indexData;
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, Uint16Array.from(indexData).buffer);
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, Uint16Array.from(indexData).buffer);
         const indexBufferFormat = GfxFormat.U16_R;
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0, };
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
 
         this.inputLayout = cache.createInputLayout({ vertexAttributeDescriptors, vertexBufferDescriptors: vertexLayoutDescriptors, indexBufferFormat });
     }
@@ -1001,7 +990,7 @@ class WaterProgram extends DeviceProgram {
     public static ub_ModelParams = 1;
 
     public override both = `
-precision mediump float;
+precision highp float;
 
 ${GfxShaderLibrary.MatrixLibrary}
 
@@ -1099,7 +1088,7 @@ export class WaterMeshData {
         };
         setAttachmentStateSimple(this.megaStateFlags, translateBlendMode(BIN.XLUBlendMode.ADD));
 
-        this.vertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, vertexData.buffer);
+        this.vertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, vertexData.buffer);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: WaterProgram.a_Position, bufferIndex: 0, bufferByteOffset: 0, format: GfxFormat.U8_RGB },
@@ -1107,11 +1096,11 @@ export class WaterMeshData {
         const vertexLayoutDescriptors: GfxInputLayoutBufferDescriptor[] = [
             { byteStride: 4, frequency: GfxVertexBufferFrequency.PerVertex },
         ];
-        this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer, byteOffset: 0, }];
+        this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer }];
 
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, Uint16Array.from(indexData).buffer);
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, Uint16Array.from(indexData).buffer);
         const indexBufferFormat = GfxFormat.U16_R;
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0, };
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
 
         this.inputLayout = cache.createInputLayout({ vertexAttributeDescriptors, vertexBufferDescriptors: vertexLayoutDescriptors, indexBufferFormat });
     }
@@ -1163,7 +1152,7 @@ class TerrainProgram extends DeviceProgram {
     public static ub_DrawParams = 2;
 
     public override both = `
-precision mediump float;
+precision highp float;
 
 ${GfxShaderLibrary.MatrixLibrary}
 
@@ -1256,7 +1245,7 @@ export class TerrainMeshData {
         };
         setAttachmentStateSimple(this.megaStateFlags, translateBlendMode(BIN.XLUBlendMode.AVERAGE));
 
-        this.vertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, vertexData.buffer);
+        this.vertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, vertexData.buffer);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: TerrainProgram.a_Position, bufferIndex: 0, bufferByteOffset: 0, format: GfxFormat.U8_RGB },
@@ -1265,11 +1254,11 @@ export class TerrainMeshData {
         const vertexLayoutDescriptors: GfxInputLayoutBufferDescriptor[] = [
             { byteStride: 4, frequency: GfxVertexBufferFrequency.PerVertex },
         ];
-        this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer, byteOffset: 0, }];
+        this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer }];
 
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, Uint16Array.from(indexData).buffer);
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, Uint16Array.from(indexData).buffer);
         const indexBufferFormat = GfxFormat.U16_R;
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0, };
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
 
         this.inputLayout = cache.createInputLayout({ vertexAttributeDescriptors, vertexBufferDescriptors: vertexLayoutDescriptors, indexBufferFormat });
     }

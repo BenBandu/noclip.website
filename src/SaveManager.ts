@@ -7,7 +7,7 @@ interface SaveStateMap {
     [k: string]: string;
 }
 
-export const enum SaveStateLocation {
+export enum SaveStateLocation {
     LocalStorage,
     SessionStorage,
     Defaults,
@@ -49,13 +49,17 @@ export class SaveManager {
             return defaultValue;
     }
 
+    public callSettingsListener(key: string): void {
+        for (let i = 0; i < this.settingListeners.length; i++)
+            if (this.settingListeners[i].key === key)
+                this.settingListeners[i].callback(this, key);
+    }
+
     public saveSetting<T>(key: string, value: T, force: boolean = false): void {
         if (!force && this.loadSetting<T | null>(key, null) === value)
             return;
         window.localStorage.setItem(this.getSettingKey(key), JSON.stringify(value));
-        for (let i = 0; i < this.settingListeners.length; i++)
-            if (this.settingListeners[i].key === key)
-                this.settingListeners[i].callback(this, key);
+        this.callSettingsListener(key);
     }
 
     public addSettingListener(key: string, callback: SettingCallback, triggerNow: boolean = true): void {
@@ -138,14 +142,6 @@ export class SaveManager {
 
     public export(): string {
         return JSON.stringify(Object.assign({}, window.localStorage), null, 4);
-    }
-
-    public setUseWebGPU(v: boolean) {
-        if (v)
-            this.saveSetting('PlatformBackend', 'WebGPU');
-        else
-            this.deleteState(this.getSettingKey('PlatformBackend'));
-        window.location.reload();
     }
 }
 

@@ -1,13 +1,12 @@
 
 import { mat4, vec3 } from 'gl-matrix';
-import { Camera, computeViewMatrix } from '../Camera.js';
+import { Camera } from '../Camera.js';
 import { CalcBillboardFlags, calcBillboardMatrix } from '../MathHelpers.js';
 import { TextureMapping } from '../TextureHolder.js';
-import { makeStaticDataBuffer } from '../gfx/helpers/BufferHelpers.js';
 import { setAttachmentStateSimple } from '../gfx/helpers/GfxMegaStateDescriptorHelpers.js';
 import { fillMatrix4x3, fillVec4v } from '../gfx/helpers/UniformBufferHelpers.js';
 import {
-    GfxBlendFactor, GfxBlendMode, GfxBuffer, GfxBufferUsage, GfxDevice, GfxFormat, GfxIndexBufferDescriptor, GfxInputLayout, GfxInputLayoutBufferDescriptor, GfxMipFilterMode, GfxProgram, GfxTexFilterMode,
+    GfxBlendFactor, GfxBlendMode, GfxBuffer, GfxBufferFrequencyHint, GfxBufferUsage, GfxDevice, GfxFormat, GfxIndexBufferDescriptor, GfxInputLayout, GfxInputLayoutBufferDescriptor, GfxMipFilterMode, GfxProgram, GfxTexFilterMode,
     GfxVertexAttributeDescriptor,
     GfxVertexBufferDescriptor,
     GfxVertexBufferFrequency,
@@ -21,6 +20,7 @@ import { DataManager } from './DataManager.js';
 import { DkrControlGlobals } from './DkrControlGlobals.js';
 import { DkrObject, MODEL_TYPE_2D_BILLBOARD } from './DkrObject.js';
 import { F3DDKR_Sprite_Program, MAX_NUM_OF_SPRITE_FRAMES, MAX_NUM_OF_SPRITE_INSTANCES } from './F3DDKR_Sprite_Program.js';
+import { createBufferFromData } from '../gfx/helpers/BufferHelpers.js';
 
 const scratchMatrix = mat4.create();
 const mirrorMatrix = mat4.fromValues(
@@ -103,8 +103,8 @@ export class DkrSprites {
                 1, 2, 3
             ]);
 
-            this.vertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, vertices.buffer);
-            this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, indices.buffer);
+            this.vertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, vertices.buffer);
+            this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, indices.buffer);
     
             const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
                 { location: F3DDKR_Sprite_Program.a_Position, bufferIndex: 0, format: GfxFormat.F32_RG, bufferByteOffset: 0 * 0x04, }
@@ -119,8 +119,8 @@ export class DkrSprites {
                 vertexBufferDescriptors,
             });
     
-            this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer, byteOffset: 0 }];
-            this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0 };
+            this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer }];
+            this.indexBufferDescriptor = { buffer: this.indexBuffer };
 
             // Setup sprite sheet texture
             const sampler = cache.createSampler({
@@ -194,7 +194,7 @@ export class DkrSprites {
 
     public advanceTime(viewerInput: ViewerRenderInput): void {
         if (viewerInput.deltaTime > 0.0)
-            this.currentFrame += 0.1 * ((1000 / 30) / viewerInput.deltaTime);
+            this.currentFrame += viewerInput.deltaTime * (20 / 1000);
     }
 
     public prepareToRender(device: GfxDevice, renderInstManager: GfxRenderInstManager, viewerInput: ViewerRenderInput, layer: number) {

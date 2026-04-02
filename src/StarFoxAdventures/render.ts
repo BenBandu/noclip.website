@@ -8,9 +8,8 @@ import { GfxrAttachmentSlot, GfxrGraphBuilder, GfxrPass, GfxrPassScope, GfxrRend
 import { GfxRenderInst, GfxRenderInstList, GfxRenderInstManager } from "../gfx/render/GfxRenderInstManager.js";
 import * as GX from '../gx/gx_enum.js';
 import * as GX_Material from '../gx/gx_material.js';
-import { DrawParams, fillSceneParamsData, GXMaterialHelperGfx, GXRenderHelperGfx, MaterialParams, SceneParams, ub_SceneParamsBufferSize } from '../gx/gx_render.js';
+import { DrawParams, fillSceneParamsData, GXMaterialHelperGfx, GXRenderHelperGfx, GXTextureMapping, MaterialParams, SceneParams, ub_SceneParamsBufferSize } from '../gx/gx_render.js';
 import { TDDraw } from '../SuperMarioGalaxy/DDraw.js';
-import { TextureMapping } from '../TextureHolder.js';
 import { nArray } from '../util.js';
 import * as Viewer from '../viewer.js';
 
@@ -64,9 +63,9 @@ export class SFARenderer implements Viewer.SceneGfx {
     protected renderHelper: GXRenderHelperGfx;
     protected renderLists: SFARenderLists;
     
-    private opaqueColorTextureMapping = new TextureMapping();
-    private opaqueDepthTextureMapping = new TextureMapping();
-    private temporalTextureMapping = new TextureMapping();
+    private opaqueColorTextureMapping = new GXTextureMapping();
+    private opaqueDepthTextureMapping = new GXTextureMapping();
+    private temporalTextureMapping = new GXTextureMapping();
     private temporalTexture = new GfxrTemporalTexture();
 
     private mainColorDesc = new GfxrRenderTargetDescription(GfxFormat.U8_RGBA_RT);
@@ -79,7 +78,7 @@ export class SFARenderer implements Viewer.SceneGfx {
     private heatShimmerMaterial: HeatShimmerMaterial | undefined = undefined;
 
     constructor(context: SceneContext, protected animController: SFAAnimationController, public materialFactory: MaterialFactory) {
-        this.renderHelper = new GXRenderHelperGfx(context.device, context, this.materialFactory.cache);
+        this.renderHelper = new GXRenderHelperGfx(context.device, context, this.materialFactory.renderCache);
 
 
         this.depthResampler = new DepthResampler(context.device, this.renderHelper.renderInstManager.gfxRenderCache);
@@ -344,7 +343,7 @@ export class SFARenderer implements Viewer.SceneGfx {
         renderInstManager.popTemplate();
 
         this.renderHelper.prepareToRender();
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
     }
 
     public destroy(device: GfxDevice): void {

@@ -346,7 +346,7 @@ export class OkamiRenderer implements Viewer.SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListMain.reset();
     }
 
@@ -382,7 +382,7 @@ const materialHacks: GXMaterialHacks = {
     ];
 */
 
-const enum OkamiPass {
+enum OkamiPass {
     SKYBOX = 1 << 0,
     GROUND = 1 << 1,
     WATER = 1 << 2,

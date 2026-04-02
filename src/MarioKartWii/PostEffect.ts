@@ -15,9 +15,9 @@ import { GfxrAttachmentSlot, GfxrGraphBuilder, GfxrRenderTargetDescription, Gfxr
 import { GfxRenderInst, GfxRenderInstManager } from "../gfx/render/GfxRenderInstManager.js";
 import { GXShaderLibrary } from "../gx/gx_material.js";
 import { DeviceProgram } from "../Program.js";
-import { TextureMapping } from "../TextureHolder.js";
 import { assert, assertExists, nArray, readString } from "../util.js";
 import { gfxDeviceNeedsFlipY } from "../gfx/helpers/GfxDeviceHelpers.js";
+import { GXTextureMapping } from "../gx/gx_render.js";
 
 //#region Bloom
 
@@ -181,7 +181,7 @@ export class EggDrawPathBloom {
     private compositeProgram: GfxProgram;
     private compositeMegaState = copyMegaState(fullscreenMegaState);
 
-    private textureMapping: TextureMapping[] = nArray(2, () => new TextureMapping());
+    private textureMapping: GXTextureMapping[] = nArray(2, () => new GXTextureMapping());
 
     constructor(device: GfxDevice, cache: GfxRenderCache, private pblm: BBLM) {
         // Threshold settings.
@@ -264,6 +264,7 @@ export class EggDrawPathBloom {
         this.textureMapping[0].gfxTexture = null;
         this.textureMapping[1].gfxTexture = null;
 
+        builder.pushDebugGroup('Bloom');
         builder.pushPass((pass) => {
             pass.setDebugName('Bloom Threshold & Downsample 1/2');
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, downsample2ColorTargetID);
@@ -363,6 +364,7 @@ export class EggDrawPathBloom {
                 renderInst.drawOnPass(cache, passRenderer);
             });
         });
+        builder.popDebugGroup();
     }
 }
 
@@ -496,7 +498,7 @@ void main() {
     }
 }
     
-const enum DOFDrawMode {
+enum DOFDrawMode {
     DrawMode0,
     DrawMode1,
     DrawMode2,
@@ -513,7 +515,7 @@ export class EggDrawPathDOF {
     private blitProgram: GfxProgram;
     private drawMode2BlurProgram: GfxProgram;
     private drawMode2CombineProgram: GfxProgram;
-    private textureMapping = nArray(2, () => new TextureMapping());
+    private textureMapping = nArray(2, () => new GXTextureMapping());
 
     constructor(device: GfxDevice, cache: GfxRenderCache, private pdof: BDOF) {
         this.drawMode = pdof.drawMode;
@@ -654,7 +656,7 @@ export class EggDrawPathDOF {
             this.pushPassesDOF_DrawMode2(builder, renderInstManager, camera, mainColorTargetID, mainDepthTargetID, mainResolveTextureID);
     }
 
-    public getIndTextureMapping(): TextureMapping {
+    public getIndTextureMapping(): GXTextureMapping {
         return this.textureMapping[1];
     }
 }

@@ -5,7 +5,7 @@ import * as BYML from '../byml.js';
 import { GfxDevice, GfxCullMode, GfxProgram, GfxMegaStateDescriptor, makeTextureDescriptor2D, GfxFormat, GfxSampler, GfxTexture, GfxTexFilterMode, GfxMipFilterMode, GfxBindingLayoutDescriptor, GfxBlendMode, GfxBlendFactor, GfxBuffer, GfxInputLayout, GfxBufferUsage, GfxBufferFrequencyHint, GfxVertexAttributeDescriptor, GfxInputLayoutBufferDescriptor, GfxVertexBufferFrequency, GfxVertexBufferDescriptor, GfxIndexBufferDescriptor } from '../gfx/platform/GfxPlatform.js';
 import { SceneContext } from '../SceneBase.js';
 import { makeBackbufferDescSimple, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers.js';
-import { F3DEX_Program, textureToCanvas } from '../BanjoKazooie/render.js';
+import { F3DEX_Program } from '../BanjoKazooie/render.js';
 import { translateBlendMode, RSP_Geometry, translateCullMode } from '../zelview/f3dzex.js';
 import { nArray, align, assert } from '../util.js';
 import { DeviceProgram } from '../Program.js';
@@ -22,12 +22,12 @@ import { TextFilt, ImageFormat, ImageSize } from "../Common/N64/Image.js";
 import { RSPSharedOutput, Vertex } from '../BanjoKazooie/f3dex.js';
 import { setAttachmentStateSimple } from '../gfx/helpers/GfxMegaStateDescriptorHelpers.js';
 import { Vec3UnitY, Vec3Zero } from '../MathHelpers.js';
-import { makeStaticDataBuffer } from '../gfx/helpers/BufferHelpers.js';
 
 import ArrayBufferSlice from '../ArrayBufferSlice.js';
 import * as Deflate from '../Common/Compression/Deflate.js';
 import { calcTextureMatrixFromRSPState } from '../Common/N64/RSP.js';
 import { GfxrAttachmentSlot } from '../gfx/render/GfxRenderGraph.js';
+import { createBufferFromData } from '../gfx/helpers/BufferHelpers.js';
 
 const pathBase = `DonkeyKong64`;
 
@@ -234,21 +234,12 @@ export class RenderData {
     public indexBuffer: GfxBuffer;
 
     constructor(device: GfxDevice, cache: GfxRenderCache, public sharedOutput: RSPSharedOutput, dynamic = false) {
-        this.vertexBufferData = makeVertexBufferData(sharedOutput.vertices);
-        if (dynamic) {
-            // there are vertex effects, so the vertex buffer data will change
-            this.vertexBuffer = device.createBuffer(
-                align(this.vertexBufferData.byteLength, 4) / 4,
-                GfxBufferUsage.Vertex,
-                GfxBufferFrequencyHint.Dynamic
-            );
-        } else {
-            this.vertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, this.vertexBufferData.buffer);
-        }
         assert(sharedOutput.vertices.length <= 0xFFFFFFFF);
+        this.vertexBufferData = makeVertexBufferData(sharedOutput.vertices);
+        this.vertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, dynamic ? GfxBufferFrequencyHint.Dynamic : GfxBufferFrequencyHint.Static, this.vertexBufferData.buffer);
 
         const indexBufferData = new Uint32Array(sharedOutput.indices);
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, indexBufferData.buffer);
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, indexBufferData.buffer);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: F3DEX_Program.a_Position, bufferIndex: 0, format: GfxFormat.F32_RGBA, bufferByteOffset: 0*0x04, },
@@ -266,8 +257,8 @@ export class RenderData {
             vertexAttributeDescriptors,
         });
 
-        this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer, byteOffset: 0, }];
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0 };
+        this.vertexBufferDescriptors = [{ buffer: this.vertexBuffer }];
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
     }
 
     public destroy(device: GfxDevice): void {
@@ -487,7 +478,7 @@ class DK64Renderer implements Viewer.SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListMain.reset();
     }
 
@@ -718,8 +709,8 @@ class SceneDesc implements Viewer.SceneDesc {
             sceneRenderer.meshRenderers.push(meshRenderer);
         }
 
-        for (let i = 0; i < sharedOutput.textureCache.textures.length; i++)
-            sceneRenderer.textureHolder.viewerTextures.push(textureToCanvas(sharedOutput.textureCache.textures[i]));
+        // for (let i = 0; i < sharedOutput.textureCache.textures.length; i++)
+        //     sceneRenderer.textureHolder.viewerTextures.push(textureToCanvas(sharedOutput.textureCache.textures[i]));
 
         // Load setup data, ported from ScriptHawk's dumpSetup() function
         /*

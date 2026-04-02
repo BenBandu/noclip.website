@@ -547,7 +547,7 @@ export class UVTXRenderHelper {
 }
 
 //TODO: check this
-const enum TexCM {
+enum TexCM {
     WRAP = 0x00,
     MIRROR = 0x01,
     CLAMP = 0x02,
@@ -590,7 +590,7 @@ class TextureData {
     }
 
     public getTextureMapping()  {
-        return { gfxTexture: this.gfxTexture, gfxSampler: this.gfxSampler, lateBinding: null };
+        return { gfxTexture: this.gfxTexture, gfxSampler: this.gfxSampler };
     }
 
     public destroy(device: GfxDevice): void {

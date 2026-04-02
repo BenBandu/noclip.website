@@ -8,7 +8,7 @@ import * as Actors from './actors.js';
 
 import { GfxDevice } from '../gfx/platform/GfxPlatform.js';
 import { FakeTextureHolder, TextureHolder } from '../TextureHolder.js';
-import { textureToCanvas, GeometryRenderer, RenderData, AnimationFile, AnimationTrack, AnimationTrackType, AnimationKeyframe, BoneAnimator, FlipbookRenderer, GeometryData, FlipbookData, MovementController, SpawnedObjects, layerFromFlags, BKLayer } from './render.js';
+import { GeometryRenderer, RenderData, AnimationFile, AnimationTrack, AnimationTrackType, AnimationKeyframe, BoneAnimator, FlipbookRenderer, GeometryData, FlipbookData, MovementController, SpawnedObjects, layerFromFlags, BKLayer } from './render.js';
 import { mat4, vec3, vec4 } from 'gl-matrix';
 import { SceneContext } from '../SceneBase.js';
 import { GfxRenderHelper } from '../gfx/render/GfxRenderHelper.js';
@@ -36,7 +36,7 @@ class BKRenderer implements Viewer.SceneGfx {
     public renderInstListSky = new GfxRenderInstList();
     public renderInstListMain = new GfxRenderInstList();
 
-    constructor(device: GfxDevice, public textureHolder: TextureHolder<any>, public objectData: ObjectData) {
+    constructor(device: GfxDevice, public textureHolder: TextureHolder, public objectData: ObjectData) {
         this.renderHelper = new GfxRenderHelper(device);
         this.sceneEmitters = new SceneEmitterHolder(device, objectData);
     }
@@ -143,7 +143,7 @@ class BKRenderer implements Viewer.SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListSky.reset();
         this.renderInstListMain.reset();
     }
@@ -277,10 +277,10 @@ export function parseAnimationFile(buffer: ArrayBufferSlice): AnimationFile {
 
 class ObjectData {
     public geoData: (GeometryData | FlipbookData | null)[] = [];
-    public gfxCache: GfxRenderCache;
+    public renderCache: GfxRenderCache;
 
     constructor(device: GfxDevice, private objectSetupData: ObjectSetupData) {
-        this.gfxCache = new GfxRenderCache(device);
+        this.renderCache = new GfxRenderCache(device);
     }
 
     public ensureGeoData(device: GfxDevice, geoFileID: number, objectID = -1): GeometryData | FlipbookData | null {
@@ -306,7 +306,7 @@ class ObjectData {
                 // but most objects support switching beteween opaque and translucent,
                 // so setting translucent by default seems safe
                 const geo = Geo.parseBK(geoData, Geo.RenderZMode.OPA, false);
-                this.geoData[geoFileID] = new GeometryData(device, this.gfxCache, geo, objectID);
+                this.geoData[geoFileID] = new GeometryData(device, this.renderCache, geo, objectID);
             } else {
                 return this.ensureFlipbookData(device, geoFileID);
             }
@@ -323,7 +323,7 @@ class ObjectData {
             }
 
             const flipbook = Flipbook.parse(file.Data);
-            this.geoData[fileID] = new FlipbookData(device, this.gfxCache, flipbook);
+            this.geoData[fileID] = new FlipbookData(device, this.renderCache, flipbook);
         }
 
         const data = this.geoData[fileID];
@@ -474,7 +474,7 @@ class ObjectData {
                 data.renderData.destroy(device);
         }
 
-        this.gfxCache.destroy();
+        this.renderCache.destroy();
     }
 }
 
@@ -513,11 +513,12 @@ class SceneDesc implements Viewer.SceneDesc {
     }
 
     private addGeo(device: GfxDevice, cache: GfxRenderCache, viewerTextures: Viewer.Texture[], sceneRenderer: BKRenderer, geo: Geo.Geometry<Geo.BKGeoNode>): GeometryRenderer {
-        for (let i = 0; i < geo.sharedOutput.textureCache.textures.length; i++)
-            viewerTextures.push(textureToCanvas(geo.sharedOutput.textureCache.textures[i]));
-
         const geoData = new GeometryData(device, cache, geo);
         sceneRenderer.geoDatas.push(geoData.renderData);
+
+        for (let i = 0; i < geoData.renderData.textures.length; i++)
+            viewerTextures.push({ gfxTexture: geoData.renderData.textures[i] });
+
         const geoRenderer = new GeometryRenderer(device, geoData);
         sceneRenderer.geoRenderers.push(geoRenderer);
         return geoRenderer;

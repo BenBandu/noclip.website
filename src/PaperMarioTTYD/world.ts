@@ -50,7 +50,7 @@ export interface Sampler {
     wrapT: GX.WrapMode;
 }
 
-export const enum MaterialLayer {
+export enum MaterialLayer {
     Opaque = 0x00,
     AlphaTest = 0x01,
     Blend = 0x02,
@@ -78,11 +78,11 @@ export interface SceneGraphPart {
     batch: Batch;
 }
 
-export const enum DrawModeFlags {
+export enum DrawModeFlags {
     IsDecal = 0x10,
 }
 
-export const enum CollisionFlags {
+export enum CollisionFlags {
     None                 = 0,
     WalkSlow             = 0x00000100,
     HazardRespawnEnabled = 0x40000000,
@@ -801,7 +801,7 @@ export function parse(buffer: ArrayBufferSlice): TTYDWorld {
                 assert(isVersion102);
                 assert(modelVcdTableOffs === vcd_tableOffs);
 
-                const enum VcdBitFlags {
+                enum VcdBitFlags {
                     POS  = 1 << 0,
                     NRM  = 1 << 1,
                     CLR0 = 1 << 2,
@@ -834,10 +834,22 @@ export function parse(buffer: ArrayBufferSlice): TTYDWorld {
                     workingBits &= ~VcdBitFlags.NRM;
                 }
 
+                const usesColorChannelVtx = (ch: GX_Material.ColorChannelControl) => {
+                    return ch.matColorSource === GX.ColorSrc.VTX || ch.ambColorSource === GX.ColorSrc.VTX;
+                };
+                const usesLightChannelVtx = (ch: GX_Material.LightChannelControl | undefined) => {
+                    if (ch === undefined)
+                        return false;
+                    return usesColorChannelVtx(ch.colorChannel) || usesColorChannelVtx(ch.alphaChannel);
+                };
+
                 if ((workingBits & VcdBitFlags.CLR0) !== 0) {
                     vat[GX.Attr.CLR0] = { compType: GX.CompType.RGBA8, compCnt: GX.CompCnt.CLR_RGBA, compShift: 0 };
                     vcd[GX.Attr.CLR0] = { type: GX.AttrType.INDEX16 };
                     workingBits &= ~VcdBitFlags.CLR0;
+                } else if (usesLightChannelVtx(material.gxMaterial.lightChannels[0])) {
+                    vat[GX.Attr.CLR0] = { compType: GX.CompType.RGBA8, compCnt: GX.CompCnt.CLR_RGBA, compShift: 0 };
+                    vcd[GX.Attr.CLR0] = { type: GX.AttrType.ZERO };
                 }
 
                 if ((workingBits & VcdBitFlags.TEX0) !== 0) {
@@ -1006,7 +1018,7 @@ export function parse(buffer: ArrayBufferSlice): TTYDWorld {
                         texMatrixTable: Array(10).fill(0xFFFF),
                     };
                     const vertexBuffers: ArrayBuffer[] = [vertexData];
-                    loadedDatas.push({ indexData, draws: [draw], totalIndexCount, totalVertexCount, vertexBuffers, vertexId, drawCalls: null, dlView: null });
+                    loadedDatas.push({ indexData, draws: [draw], totalIndexCount, totalVertexCount, vertexBuffers, vertexId, drawCalls: null, dlView: null, endOffs: null });
                     displayListTableIdx += 0x04;
                 }
 
@@ -1047,7 +1059,7 @@ export function parse(buffer: ArrayBufferSlice): TTYDWorld {
     return { information, textureNameTable, fogData, rootNode, materials, animations };
 }
 
-export const enum LoopMode {
+export enum LoopMode {
     ONCE = 0,
     REPEAT = 2,
     MIRRORED_ONCE = 3,

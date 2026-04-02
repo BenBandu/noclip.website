@@ -7,18 +7,17 @@ import { Frustum } from "../Geometry.js";
 import { getMatrixTranslation, scaleMatrix, transformVec3Mat4w1 } from "../MathHelpers.js";
 import { DeviceProgram } from "../Program.js";
 import { TextureMapping } from "../TextureHolder.js";
-import { makeStaticDataBufferFromSlice } from "../gfx/helpers/BufferHelpers.js";
 import { setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
 import { GfxShaderLibrary } from "../gfx/helpers/GfxShaderLibrary.js";
 import { reverseDepthForCompareMode } from "../gfx/helpers/ReversedDepthHelpers.js";
 import { fillColor, fillMatrix4x3, fillVec4 } from "../gfx/helpers/UniformBufferHelpers.js";
-import { GfxBlendFactor, GfxBufferUsage, GfxCompareMode, GfxCullMode, GfxDevice, GfxFormat, GfxIndexBufferDescriptor, GfxInputLayoutBufferDescriptor, GfxMegaStateDescriptor, GfxMipFilterMode, GfxSamplerDescriptor, GfxTexFilterMode, GfxVertexAttributeDescriptor, GfxVertexBufferDescriptor, GfxVertexBufferFrequency, GfxWrapMode } from "../gfx/platform/GfxPlatform.js";
-import { GfxBuffer, GfxInputLayout, GfxProgram } from "../gfx/platform/GfxPlatformImpl.js";
+import { GfxBuffer, GfxInputLayout, GfxProgram, GfxBlendFactor, GfxBufferUsage, GfxCompareMode, GfxCullMode, GfxDevice, GfxFormat, GfxIndexBufferDescriptor, GfxInputLayoutBufferDescriptor, GfxMegaStateDescriptor, GfxMipFilterMode, GfxSamplerDescriptor, GfxTexFilterMode, GfxVertexAttributeDescriptor, GfxVertexBufferDescriptor, GfxVertexBufferFrequency, GfxWrapMode, GfxBufferFrequencyHint } from "../gfx/platform/GfxPlatform.js";
 import { GfxRenderInst, GfxRenderInstManager, makeDepthKey, setSortKeyTranslucentDepth } from "../gfx/render/GfxRenderInstManager.js";
 import { assert, assertExists, fallbackUndefined, nArray, readString, setBitFlagEnabled } from "../util.js";
 import { normalizeTexturePath } from "./ESM.js";
 import { NIFParse } from "./NIFParse.js";
 import { Globals, ModelCache } from "./Render.js";
+import { createBufferFromSlice } from "../gfx/helpers/BufferHelpers.js";
 
 export class Stream {
     private offset: number = 0;
@@ -174,14 +173,14 @@ class NiTriShapeData {
 
     constructor(modelCache: ModelCache, public nif: NIFParse.NiTriShapeData) {
         const cache = modelCache.renderCache, device = modelCache.device;
-        this.posBuffer = makeStaticDataBufferFromSlice(device, GfxBufferUsage.Vertex, assertExists(this.nif.vertices));
+        this.posBuffer = createBufferFromSlice(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, assertExists(this.nif.vertices));
         if (this.nif.normals !== null)
-            this.nrmBuffer = makeStaticDataBufferFromSlice(device, GfxBufferUsage.Vertex, this.nif.normals);
+            this.nrmBuffer = createBufferFromSlice(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, this.nif.normals);
         if (this.nif.vertexColors !== null)
-            this.clrBuffer = makeStaticDataBufferFromSlice(device, GfxBufferUsage.Vertex, this.nif.vertexColors);
+            this.clrBuffer = createBufferFromSlice(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, this.nif.vertexColors);
         for (let i = 0; i < this.nif.uVSets.length; i++)
-            this.uvBuffer.push(makeStaticDataBufferFromSlice(device, GfxBufferUsage.Vertex, this.nif.uVSets[i]));
-        this.indexBuffer = makeStaticDataBufferFromSlice(device, GfxBufferUsage.Index, this.nif.triangles);
+            this.uvBuffer.push(createBufferFromSlice(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, this.nif.uVSets[i]));
+        this.indexBuffer = createBufferFromSlice(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, this.nif.triangles);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: NifShader.a_Position,  format: GfxFormat.F32_RGB,  bufferByteOffset: 0, bufferIndex: 0 },
@@ -199,12 +198,12 @@ class NiTriShapeData {
 
         this.inputLayout = cache.createInputLayout({ vertexAttributeDescriptors, vertexBufferDescriptors, indexBufferFormat: GfxFormat.U16_R });
         this.vertexBufferDescriptors = [
-            { buffer: this.posBuffer, byteOffset: 0 },
-            { buffer: fallbackUndefined(this.nrmBuffer, modelCache.zeroBuffer), byteOffset: 0 },
-            { buffer: fallbackUndefined(this.clrBuffer, modelCache.zeroBuffer), byteOffset: 0 },
-            { buffer: fallbackUndefined(this.uvBuffer[0], modelCache.zeroBuffer), byteOffset: 0 },
+            { buffer: this.posBuffer },
+            { buffer: fallbackUndefined(this.nrmBuffer, modelCache.zeroBuffer) },
+            { buffer: fallbackUndefined(this.clrBuffer, modelCache.zeroBuffer) },
+            { buffer: fallbackUndefined(this.uvBuffer[0], modelCache.zeroBuffer) },
         ];
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0 };
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
     }
 
     public setOnRenderInst(renderInst: GfxRenderInst): void {
@@ -273,8 +272,8 @@ class NifShader extends DeviceProgram {
     public static ub_InstanceParams = 2;
 
     public override both = `
-precision mediump float;
-precision mediump sampler2DArray;
+precision highp float;
+precision highp sampler2DArray;
 
 ${GfxShaderLibrary.MatrixLibrary}
 
@@ -504,7 +503,8 @@ class NiTriShape {
             wrapT: desc.clampMode & 1 ? GfxWrapMode.Repeat : GfxWrapMode.Clamp,
             magFilter: GfxTexFilterMode.Point,
             minFilter: GfxTexFilterMode.Point,
-            mipFilter: GfxMipFilterMode.NoMip,
+            mipFilter: GfxMipFilterMode.Nearest,
+            minLOD: 0, maxLOD: 0,
         };
         switch (desc.filterMode) {
         case NIFParse.TexFilterMode.FILTER_NEAREST:

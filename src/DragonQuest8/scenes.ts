@@ -5,22 +5,21 @@ import { colorNewFromRGBA } from "../Color.js";
 import { SceneContext } from '../SceneBase.js';
 import { FakeTextureHolder, TextureHolder } from '../TextureHolder.js';
 import { makeAttachmentClearDescriptor, makeBackbufferDescSimple } from '../gfx/helpers/RenderGraphHelpers.js';
-import { GfxBindingLayoutDescriptor, GfxDevice, GfxProgram } from '../gfx/platform/GfxPlatform.js';
+import { GfxBindingLayoutDescriptor, GfxDevice } from '../gfx/platform/GfxPlatform.js';
 import { GfxRenderCache } from '../gfx/render/GfxRenderCache.js';
 import { GfxrAttachmentSlot } from '../gfx/render/GfxRenderGraph.js';
 import { GfxRenderHelper } from '../gfx/render/GfxRenderHelper.js';
-import * as SINFO from "./sceneInfo.js";
+import { GfxRenderInstList } from "../gfx/render/GfxRenderInstManager.js";
 import * as UI from '../ui.js';
+import { assert } from "../util.js";
 import * as Viewer from '../viewer.js';
 import * as BUNDLE from "./bundle.js";
 import * as CHR from './chr.js';
 import * as IMG from './img.js';
 import * as MAP from './map.js';
-import * as MDS from './mds.js';
-import { CHRRenderer, DQ8Program, MAPRenderer, MDSInstance, fillSceneParamsDataOnTemplate, textureToCanvas } from './render.js';
+import { CHRRenderer, MAPRenderer, MDSInstance, fillSceneParamsDataOnTemplate } from './render.js';
+import * as SINFO from "./sceneInfo.js";
 import * as STB from "./stb.js";
-import { assert } from "../util.js";
-import { GfxRenderInstList } from "../gfx/render/GfxRenderInstManager.js";
 
 const bindingLayouts: GfxBindingLayoutDescriptor[] = [
     { numUniformBuffers: 2, numSamplers: 1 }, // ub_SceneParams, ub_SubmeshParams
@@ -32,10 +31,16 @@ export class DQ8Renderer implements Viewer.SceneGfx {
     public MDSRenderers: MDSInstance[] = [];
     private renderHelper: GfxRenderHelper;
     private renderInstListMain = new GfxRenderInstList();
+    private wireframe = false;
+    public useVertexColors = true;
+    public sceneInfo = new SINFO.SceneInfo();
 
-    constructor(device: GfxDevice, public textureHolder: TextureHolder<any>, public sceneDesc: SceneDesc, public texNameToTextureData: Map<string, IMG.TextureData>) {
+    // Time of day control
+    private timeOfDayPanel: UI.TimeOfDayPanel | null = null;
+    private useDynamicTime: boolean = true;
+
+    constructor(device: GfxDevice, public textureHolder: TextureHolder, public sceneDesc: SceneDesc, public texNameToTextureData: Map<string, IMG.TextureData>) {
         this.renderHelper = new GfxRenderHelper(device);
-        SINFO.gDQ8SINFO.reset();
     }
 
     public adjustCameraController(c: CameraController) {
@@ -50,18 +55,17 @@ export class DQ8Renderer implements Viewer.SceneGfx {
         const template = this.renderHelper.pushTemplateRenderInst();
         template.setBindingLayouts(bindingLayouts);
         fillSceneParamsDataOnTemplate(template, viewerInput.camera);
-        if(SINFO.gDQ8SINFO.bWireframe)
-            template.setMegaStateFlags({ wireframe: true });
+        template.setMegaStateFlags({ wireframe: this.wireframe });
 
         this.renderHelper.renderInstManager.setCurrentList(this.renderInstListMain);
 
         //Renderers
         for (let i = 0; i < this.MAPRenderers.length; i++)
-            this.MAPRenderers[i].prepareToRender(device, this.renderHelper.renderInstManager, viewerInput);
+            this.MAPRenderers[i].prepareToRender(this, this.renderHelper.renderInstManager, viewerInput);
         for (let i = 0; i < this.CHRRenderers.length; i++)
-            this.CHRRenderers[i].prepareToRender(device, this.renderHelper.renderInstManager, viewerInput);
+            this.CHRRenderers[i].prepareToRender(this, this.renderHelper.renderInstManager, viewerInput);
         for (let i = 0; i < this.MDSRenderers.length; i++)
-            this.MDSRenderers[i].prepareToRender(device, this.renderHelper.renderInstManager, viewerInput);
+            this.MDSRenderers[i].prepareToRender(this, this.renderHelper.renderInstManager, viewerInput);
 
         this.renderHelper.renderInstManager.popTemplate();
         this.renderHelper.prepareToRender();
@@ -72,10 +76,15 @@ export class DQ8Renderer implements Viewer.SceneGfx {
         const builder = this.renderHelper.renderGraph.newGraphBuilder();
         let clearColor = colorNewFromRGBA(1, 0, 0);
 
-        SINFO.UpdateSceneInfo(SINFO.gDQ8SINFO, viewerInput.deltaTime);
+        this.sceneInfo.update(viewerInput.deltaTime);
 
-        if (SINFO.gDQ8SINFO.currentLightSet)
-            clearColor = SINFO.gDQ8SINFO.currentLightSet!.bgcolor;
+        // Update time-of-day panel display when using dynamic time
+        if (this.timeOfDayPanel !== null && this.useDynamicTime) {
+            this.timeOfDayPanel.setTime(this.sceneInfo.currentHour / 24);
+        }
+
+        if (this.sceneInfo.currentLightSet)
+            clearColor = this.sceneInfo.currentLightSet!.bgcolor;
         const passDescriptor = makeAttachmentClearDescriptor(clearColor);
 
         const mainColorDesc = makeBackbufferDescSimple(GfxrAttachmentSlot.Color0, viewerInput, passDescriptor);
@@ -95,7 +104,7 @@ export class DQ8Renderer implements Viewer.SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListMain.reset();
     }
 
@@ -106,26 +115,35 @@ export class DQ8Renderer implements Viewer.SceneGfx {
         const progressSelect = new UI.SingleSelect();
         progressSelect.setStrings(sceneDesc.progressFList);
         progressSelect.onselectionchange = (strIndex: number) => {
-            SINFO.gDQ8SINFO.currentGameProgress = sceneDesc.indexToProgress[strIndex];
+            this.sceneInfo.currentGameProgress = sceneDesc.indexToProgress[strIndex];
         };
         progressSelect.selectItem(0);
         progressPanel.contents.appendChild(progressSelect.elem);
         return progressPanel;
     }
 
-    private createDayHourPanel(): UI.Panel {
-        const hourPanel = new UI.Panel();
-        hourPanel.customHeaderBackgroundColor = UI.COOL_BLUE_COLOR;
-        hourPanel.setTitle(UI.TIME_OF_DAY_ICON, 'Time Of Day');
-        const hourSelect = new UI.SingleSelect();
-        const indexToUserHour = [-1, 1.5, 6.5, 9.5, 17.5, 18.5, 19.5];
-        hourSelect.setStrings(["Dynamic", "1:30", "6:30", "9:30", "17:30", "18:30", "19:30"]);
-        hourSelect.onselectionchange = (strIndex: number) => {
-            SINFO.gDQ8SINFO.currentUserHour = indexToUserHour[strIndex];
+    private createDayHourPanel(): UI.TimeOfDayPanel {
+        this.timeOfDayPanel = new UI.TimeOfDayPanel();
+        this.timeOfDayPanel.setTime(this.sceneInfo.currentHour / 24);
+
+        // Default to dynamic time
+        this.sceneInfo.currentUserHour = -1;
+        this.useDynamicTime = true;
+
+        this.timeOfDayPanel.onvaluechange = (t: number, useDynamicTime: boolean) => {
+            this.useDynamicTime = useDynamicTime;
+            if (useDynamicTime) {
+                // Re-enable dynamic time
+                this.sceneInfo.currentUserHour = -1;
+            } else {
+                // Freeze time at the selected value
+                const hour = t * 24;
+                this.sceneInfo.currentUserHour = hour;
+                this.sceneInfo.currentHour = hour;
+            }
         };
-        hourSelect.selectItem(0);
-        hourPanel.contents.appendChild(hourSelect.elem);
-        return hourPanel;
+
+        return this.timeOfDayPanel;
     }
 
     private createRenderHackPanel(): UI.Panel {
@@ -134,21 +152,19 @@ export class DQ8Renderer implements Viewer.SceneGfx {
         renderHacksPanel.setTitle(UI.RENDER_HACKS_ICON, 'Render Hacks');
         const enableVertexColorsCheckbox = new UI.Checkbox('Enable Vertex Colors', true);
         enableVertexColorsCheckbox.onchanged = () => {
-            SINFO.gDQ8SINFO.bUseVColors = enableVertexColorsCheckbox.checked;
+            this.useVertexColors = enableVertexColorsCheckbox.checked;
         };
         renderHacksPanel.contents.appendChild(enableVertexColorsCheckbox.elem);
 
         if (this.renderHelper.device.queryLimits().wireframeSupported) {
             const wireframe = new UI.Checkbox('Wireframe', false);
             wireframe.onchanged = () => {
-                SINFO.gDQ8SINFO.bWireframe = wireframe.checked;
+                this.wireframe = wireframe.checked;
             };
             renderHacksPanel.contents.appendChild(wireframe.elem);
         }
 
         return renderHacksPanel;
-
-        
     }
 
     public createPanels(): UI.Panel[] {
@@ -191,7 +207,6 @@ class SceneDesc implements Viewer.SceneDesc {
         const texNameToTextureData = new Map<string, IMG.TextureData>();
         const renderer = new DQ8Renderer(gfxDevice, fakeTextureHolder, this, texNameToTextureData);
         const cache = renderer.getRenderCache();
-        const canvasTexMap = new Map<string, boolean>();
         const chrMap = new Map<string, CHR.CHR>();
         const chrs: CHR.CHR[] = [];
         const stbs: (STB.STB | null)[] = [];
@@ -310,56 +325,33 @@ class SceneDesc implements Viewer.SceneDesc {
                 chrDayPeriodFlags.push(map.chrDayPeriodFlags[i]);
                 chrProgressFlags.push(null);
             }
-            if (map.img !== null) {
-                for (let i = 0; i < map.img.textures.length; i++) {
-                    const imgTex = map.img.textures[i];
-                    if (!canvasTexMap.has(imgTex.name)) {
-                        canvasTexMap.set(imgTex.name, true);
-                        viewerTextures.push(textureToCanvas(imgTex));
-                    }
-                }
-            }
             for (const [k, v] of map.textureDataMap) {
                 if (texNameToTextureData.has(k))
                     throw "already there";
                 texNameToTextureData.set(k, v);
+                viewerTextures.push({ gfxTexture: v.texture });
             }
             for (let j = 0; j < map.skies.length; j++) {
                 const sky = map.skies[j];
-                if (sky.img !== null) {
-                    for (let i = 0; i < sky.img.textures.length; i++) {
-                        const imgTex = sky.img.textures[i];
-                        if (!canvasTexMap.has(imgTex.name)) {
-                            canvasTexMap.set(imgTex.name, true);
-                            viewerTextures.push(textureToCanvas(imgTex));
-                        }
-                    }
-                }
-                for (const [k, v] of sky.textureDataMap)
+                for (const [k, v] of sky.textureDataMap) {
                     texNameToTextureData.set(k, v);
+                    viewerTextures.push({ gfxTexture: v.texture });
+                }
             }
             renderer.MAPRenderers.push(new MAPRenderer(cache, [map]));
 
-            for (let i = 0; i < map.mapInfo.lightSetCount; i++) {
-                SINFO.gDQ8SINFO.lightSets.push(map.mapInfo.lightSets[i]);
-            }
+            for (let i = 0; i < map.mapInfo.lightSetCount; i++)
+                renderer.sceneInfo.lightSets.push(map.mapInfo.lightSets[i]);
         }
 
         for (let j = 0; j < chrs.length; j++) {
             const chrImg = chrs[j].img;
-            if (chrImg !== null) {
-                for (let i = 0; i < chrImg.textures.length; i++) {
-                    const imgTex = chrImg.textures[i];
-                    if (!canvasTexMap.has(imgTex.name)) {
-                        canvasTexMap.set(imgTex.name, true);
-                        viewerTextures.push(textureToCanvas(imgTex));
-                    }
-                }
-            }
-            for (const [k, v] of chrs[j].textureDataMap)
+            for (const [k, v] of chrs[j].textureDataMap) {
                 texNameToTextureData.set(chrs[j].name + k, v);
+                viewerTextures.push({ gfxTexture: v.texture });
+            }
         }
-        renderer.CHRRenderers.push(new CHRRenderer(cache, chrs, chrTransforms, chrEulerRotations, chrNPCDayPeriods, chrDayPeriodFlags, stbs, chrProgressFlags));
+        renderer.CHRRenderers.push(new CHRRenderer(renderer.sceneInfo, cache, chrs, chrTransforms, chrEulerRotations, chrNPCDayPeriods, chrDayPeriodFlags, stbs, chrProgressFlags));
 
         return renderer;
     }

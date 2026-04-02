@@ -5,7 +5,6 @@ import AnimationController from '../AnimationController.js';
 import { CameraController } from '../Camera.js';
 import * as CX from '../Common/Compression/CX.js';
 import { SceneContext } from '../SceneBase.js';
-import { TextureOverride } from '../TextureHolder.js';
 import { gfxDeviceNeedsFlipY } from '../gfx/helpers/GfxDeviceHelpers.js';
 import { makeBackbufferDescSimple, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers.js';
 import { GfxDevice } from '../gfx/platform/GfxPlatform.js';
@@ -24,7 +23,7 @@ const name = "Klonoa";
 
 const pathBase = `Klonoa`;
 
-const enum KlonoaPass {
+enum KlonoaPass {
     SKYBOX = 0x01,
     MAIN = 0x02,
     INDIRECT = 0x04,
@@ -108,7 +107,7 @@ class KlonoaRenderer implements Viewer.SceneGfx {
                 pass.attachResolveTexture(opaqueSceneTextureID);
 
                 pass.exec((passRenderer, scope) => {
-                    this.renderInstListInd.resolveLateSamplerBinding('opaque-scene-texture', { gfxTexture: scope.getResolveTextureForID(opaqueSceneTextureID), gfxSampler: null, lateBinding: null });
+                    this.renderInstListInd.resolveLateSamplerBinding('opaque-scene-texture', { gfxTexture: scope.getResolveTextureForID(opaqueSceneTextureID), gfxSampler: null });
                     this.renderInstListInd.drawOnPassRenderer(this.renderHelper.renderCache, passRenderer);
                 });
             });
@@ -117,7 +116,7 @@ class KlonoaRenderer implements Viewer.SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.renderHelper.prepareToRender();
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListSky.reset();
         this.renderInstListMain.reset();
         this.renderInstListInd.reset();

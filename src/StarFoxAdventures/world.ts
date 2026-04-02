@@ -48,7 +48,7 @@ export class World {
     public renderCache: GfxRenderCache;
 
     private constructor(public context: SceneContext, public gameInfo: GameInfo, public subdirs: string[], private materialFactory: MaterialFactory) {
-        this.renderCache = this.materialFactory.cache;
+        this.renderCache = this.materialFactory.renderCache;
     }
 
     private async init(dataFetcher: DataFetcher) {
@@ -274,8 +274,8 @@ class WorldRenderer extends SFARenderer {
     // XXX: for testing
     public loadTexture(id: number, useTex1: boolean = false) {
         const texture = this.world.resColl.texFetcher.getTexture(this.world.renderCache, id, useTex1);
-        if (texture !== null && texture.viewerTexture !== undefined)
-            console.log(`Loaded texture "${texture.viewerTexture.name}"`);
+        if (texture !== null)
+            console.log(`Loaded texture "${texture.gfxTexture.ResourceName!}"`);
         else
             console.log(`Failed to load texture`);
     }

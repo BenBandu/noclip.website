@@ -148,7 +148,7 @@ class OceanSpherePlaneEdge {
     }
 }
 
-const enum OceanSphereNrv { Wait }
+enum OceanSphereNrv { Wait }
 
 const materialParams = new MaterialParams();
 const drawParams = new DrawParams();
@@ -176,11 +176,11 @@ export class OceanSphere extends LiveActor<OceanSphereNrv> {
 
     private materialHelperXluBack: GXMaterialHelperGfx;
     private materialHelperXluFront: GXMaterialHelperGfx;
-    private ddrawXlu = new TDDraw();
+    private ddrawXlu = new TDDraw('OceanSphere Xlu');
 
     private materialHelperEnvBack: GXMaterialHelperGfx;
     private materialHelperEnvFront: GXMaterialHelperGfx;
-    private ddrawEnv = new TDDraw();
+    private ddrawEnv = new TDDraw('OceanSphere Opa');
 
     private tevReg1Front = colorNewFromRGBA8(0x0051706F);
     private tevReg1Back = colorNewFromRGBA8(0x0051706F);
@@ -465,7 +465,7 @@ export class OceanSphere extends LiveActor<OceanSphereNrv> {
             // TODO(jstpierre)
 
             // loadMaterialBack
-            this.ddrawEnv.beginDraw(sceneObjHolder.modelCache.cache);
+            this.ddrawEnv.beginDraw(sceneObjHolder.modelCache.renderCache);
             this.drawSphere(this.ddrawEnv, true);
             const renderInstEnvBack = this.ddrawEnv.endDrawAndMakeRenderInst(renderInstManager);
 
@@ -486,7 +486,7 @@ export class OceanSphere extends LiveActor<OceanSphereNrv> {
 
         // loadMaterialFace
 
-        this.ddrawXlu.beginDraw(sceneObjHolder.modelCache.cache);
+        this.ddrawXlu.beginDraw(sceneObjHolder.modelCache.renderCache);
 
         // GXSetCullMode(GX_CULL_FRONT);
         this.drawSphere(this.ddrawXlu, false);

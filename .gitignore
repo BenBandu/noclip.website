@@ -54,7 +54,7 @@ rust/target/
 
 data/*
 !data/.gitkeep
+!data/Examples/
 dist/
 
-# wasm-pack not working correctly
-pkg/index.js
+.wireit

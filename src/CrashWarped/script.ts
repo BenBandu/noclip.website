@@ -1,6 +1,6 @@
 import { DatabaseKey, GOOL, LevelData, MeshFlags, ModelInfo, ModelType, ObjectPlacement, SeriesDatabase, decodeChunkName } from "./bin.js";
 import { assert, assertExists, nArray } from "../util.js";
-import { clamp, getMatrixTranslation, lerp, MathConstants, normToLength, randomRange, setMatrixTranslation, transformVec3Mat4w1, Vec3One, Vec3Zero } from "../MathHelpers.js";
+import { clamp, getMatrixTranslation, lerp, MathConstants, normToLength, randomRangeFloat, setMatrixTranslation, transformVec3Mat4w1, Vec3One, Vec3Zero } from "../MathHelpers.js";
 import { ViewerRenderInput } from "../viewer.js";
 import { mat4, ReadonlyVec3, vec3 } from "gl-matrix";
 import { RenderParams as RenderParams, ModelData, QuadListData, renderMesh, renderQuadList, WarpTextureRemap, RenderMode, RenderGlobals, renderSprite } from "./render.js";
@@ -234,7 +234,7 @@ export function initGlobals(id: number, completed: boolean, globals: number[]): 
     globals[0x12] = 7;
     globals[0x5F] = 0x2A;
     globals[0xA] = 0x100;
-    globals[GlobalVariable.BOSS_CUTSCENE] = randomRange(1, 21) | 0;
+    globals[GlobalVariable.BOSS_CUTSCENE] = randomRangeFloat(1, 21) | 0;
     globals[0x61] = buildPointer(PointerBase.OBJECT, 0); // not sure what this is or how it gets set
 }
 
@@ -292,7 +292,7 @@ interface ArgHandler<S, T> {
     literal: (value: number, s: S) => T;
 }
 
-const enum ArgType {
+enum ArgType {
     CONST,
     BOOL,
     VAR,
@@ -477,7 +477,7 @@ function asVec(arg: Argument): IndirectVecVar | null | undefined {
     return parseArgument<void, IndirectVecVar | null | undefined>(arg, argToVecConverter, undefined);
 }
 
-const enum PointerBase {
+enum PointerBase {
     NONE,
     MEMBER,
     PARAMETER,
@@ -883,7 +883,7 @@ class InstructionPrinter implements InstructionHandler<string> {
 
 const scriptPrinter = new InstructionPrinter();
 
-const enum ExecResult {
+enum ExecResult {
     CONTINUE,
     RETURN,
     NEW_STATE,
@@ -944,7 +944,7 @@ export class GameState {
 
 const toRad = MathConstants.TAU / 0x1000;
 
-const enum ObjectFlags {
+enum ObjectFlags {
     TARGET_YAW   = 0x00000001,
     BACKWARDS    = 0x00000002,
     PATH_YAW     = 0x00000004,
@@ -963,7 +963,7 @@ const enum ObjectFlags {
     FIXED_UV     = 0x00100000,
 }
 
-const enum CollisionFlags {
+enum CollisionFlags {
     HIT_GROUND = 0x0001,
     ON_PATH = 0x0004,
     NEGATIVE_TURN = 0x0008,
@@ -973,14 +973,14 @@ const enum CollisionFlags {
     REACHED_ANGLE = 0x0800,
 }
 
-const enum RefFlags {
+enum RefFlags {
     ACTIVE = 0x1,
     SINGLE_SPAWN = 0x2,
     UNKNOWN_4 = 0x4,
     TRIGGERED = 0x8,
 }
 
-const enum ScriptMode {
+enum ScriptMode {
     UPDATE,
     PRE_RUN,
     SIGNAL,
@@ -2208,7 +2208,7 @@ class InstructionExecutor implements InstructionHandler<ExecResult> {
             case Opcode.MOD: result = left % right; break;
             case Opcode.XOR: result = left ^ right; break;
             case Opcode.HAS_BITS: result = bool((left & right) === right); break;
-            case Opcode.RAND: result = randomRange(left, right) | 0; break;
+            case Opcode.RAND: result = randomRangeFloat(left, right) | 0; break;
             case Opcode.SHIFT: {
                 if (right >= 0)
                     result = left << right;
@@ -2987,8 +2987,8 @@ export class NaiveInterpreter {
                 case MIPS.SLTIU: this.regs[rt] = (this.regs[rs] >>> 0) < u_imm ? 1 : 0; break;
                 case MIPS.SLT: this.regs[rd] = this.regs[rs] < this.regs[rt] ? 1 : 0; break;
 
-                case MIPS.BEQ: shouldBranch = this.regs[rs] == this.regs[rt]; break;
-                case MIPS.BNE: shouldBranch = this.regs[rs] != this.regs[rt]; break;
+                case MIPS.BEQ: shouldBranch = this.regs[rs] === this.regs[rt]; break;
+                case MIPS.BNE: shouldBranch = this.regs[rs] !== this.regs[rt]; break;
                 case MIPS.BLTZ: shouldBranch = this.regs[rs] < 0; break;
                 case MIPS.BGEZ: shouldBranch = this.regs[rs] >= 0; break;
 

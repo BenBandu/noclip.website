@@ -1,8 +1,11 @@
+import { bitsAsFloat32, float32AsBits } from '../MathHelpers.js';
 import { nArray, assert } from '../util.js';
 
-export const enum Opcode {
+export enum Opcode {
     NOP     = 0x00,
     BRANCH  = 0x01,
+
+    J       = 0x02,
     JAL     = 0x03,
     BEQ     = 0x04,
     BNE     = 0x05,
@@ -55,6 +58,7 @@ export const enum Opcode {
     XOR     = 0x126,
     NOR     = 0x127,
     SLT     = 0x12A,
+    DADDU   = 0x12D,
 
     // coprocessor 1 opcode block
     COPOP   = 0x200,
@@ -73,7 +77,7 @@ export const enum Opcode {
     BGEZ    = 0x401,
 }
 
-export const enum RegName {
+export enum RegName {
     R0 = 0x00,
     AT = 0x01,
     V0 = 0x02,
@@ -126,6 +130,26 @@ export interface BranchInfo {
     op: Opcode;
 }
 
+export function parseOpcode(instr: number): Opcode {
+    let op: Opcode = instr >>> 26;
+    const rs = (instr >>> 21) & 0x1F;
+    if (op === Opcode.NOP && instr !== 0)
+        op = (instr & 0x3F) | Opcode.REGOP;
+    else if (op === Opcode.COP1) {
+        if (rs === Opcode.COP0 || rs === Opcode.COP1)
+            op = Opcode.FLOATOP | (instr & 0x3F);
+        else
+            op = Opcode.COPOP | rs;
+    }
+    return op;
+}
+
+function plausibleFloat(v: number): boolean {
+    if (v === 0)
+        return true;
+    return Math.abs(v) > 1e-10 && Math.abs(v) < 1e10;
+}
+
 // A simple MIPS interpreter that can only handle mostly-linear functions
 // A very small amount of information is kept about branches, and no attempt
 // is made to handle loops, nested conditionals, or most register modification
@@ -137,6 +161,14 @@ export class NaiveInterpreter {
     protected done = false;
     protected valid = true;
     public lastInstr = 0;
+    public littleEndian = false;
+    // ughhhh so for pokemon snap there aren't too many different relevant pointers for most functions,
+    // so you can get by with guessing things based on just the load/store offset
+    // for ffx, I could be a lot more certain of how data was moving around and decided to retain the full address as best we know
+    // these are both awful and would be solved by actually storing structured data in the registers rather than a flat value
+    // but for now, a terrible and inscrutable toggle
+    public preferStructAddressesToOffsets = true;
+    public view: DataView
 
     public reset(): void {
         for (let i = 0; i < this.regs.length; i++) {
@@ -159,15 +191,16 @@ export class NaiveInterpreter {
     public parseFromView(view: DataView, offs = 0): boolean {
         this.reset();
         const branches: BranchInfo[] = [];
-
+        this.view = view;
         let func = 0;
+        let funcOp = Opcode.JAL;
         let currBranch: BranchInfo | null = null;
         // next offset at which all paths of execution are guaranteed to meet
         // only updated when necessary for branches
         let nextMeet = 0;
 
         while (!this.done) {
-            const instr = view.getUint32(offs + 0x00);
+            const instr = view.getUint32(offs + 0x00, this.littleEndian);
             this.lastInstr = instr;
 
             const op = parseMIPSOpcode(instr);
@@ -175,8 +208,8 @@ export class NaiveInterpreter {
             const rt = (instr >>> 16) & 0x1F;
             const rd = (instr >>> 11) & 0x1F;
             const frd = (instr >>> 6) & 0x1F;
-            const imm = view.getInt16(offs + 0x02);
             const u_imm = (instr >>> 0) & 0xFFFF;
+            const imm = (u_imm << 16) >> 16;
             switch (op) {
                 case Opcode.NOP:
                     break;
@@ -184,7 +217,7 @@ export class NaiveInterpreter {
                     if (rs === 0 && rt === 0 && imm > 0) {
                         nextMeet = Math.max(nextMeet, offs + 4 * (imm + 1));
                         if (currBranch !== null) {
-                            assert(!this.valid || currBranch.end === -1 || currBranch.end === offs + 8, "unconditional branch in the middle of if block");
+                            // assert(!this.valid || currBranch.end === -1 || currBranch.end === offs + 8, "unconditional branch in the middle of if block");
                             currBranch.end = offs + 8;
                         }
                         break; // unconditional branch
@@ -263,16 +296,23 @@ export class NaiveInterpreter {
                 case Opcode.LHU:
                 case Opcode.LWC1: {
                     const target = op === Opcode.LWC1 ? this.fregs[rt] : this.regs[rt];
+                    // we're barely handling memory interactions, so just try to keep some meaningful record
                     if (imm === 0)
                         target.value = this.guessValue(rs);
-                    else if ((this.regs[rs].value & 0xFFFF) === 0)
-                        target.value = this.guessValue(rs) + imm;
+                    else if ((this.regs[rs].value & 0xFFFF) === 0 || this.preferStructAddressesToOffsets)
+                        target.value = this.guessValue(rs) + imm; // filling in a load after a LUI - keep the address
                     else
-                        target.value = imm;
+                        target.value = imm; // looks like a struct access: preserve the offset and assume we can infer from context
 
                     target.lastOp = op;
                 } break;
 
+                case Opcode.DADDU:
+                    if (rt === 0) {
+                        this.regs[rd].value = this.regs[rs].value;
+                        this.regs[rd].lastOp = this.regs[rs].lastOp;
+                        break;
+                    }
                 case Opcode.ADDU: {
                     this.regs[rd].value = this.guessValue(rs) + this.guessValue(rt);
                     this.regs[rd].lastOp = op;
@@ -312,8 +352,10 @@ export class NaiveInterpreter {
                     this.regs[rt].value = (u_imm << 16) >>> 0;
                     this.regs[rt].lastOp = op;
                 } break;
+                case Opcode.J:
                 case Opcode.JAL:
                     func = (instr & 0xFFFFFF) << 2;
+                    funcOp = op;
                     break;
                 case Opcode.JR: {
                     if (rs === RegName.RA) {
@@ -335,12 +377,27 @@ export class NaiveInterpreter {
                 case Opcode.ADDS:
                 case Opcode.MULS: {
                     this.fregs[frd].lastOp = op;
-                    this.fregs[frd].value = this.fregs[rd].value;
-                    if (this.fregs[rd].value === 0 || (this.fregs[rd].lastOp === Opcode.LWC1 && this.fregs[rd].value < 0x80000000))
-                        this.fregs[frd].value = this.fregs[rt].value;
+                    const left = bitsAsFloat32(this.fregs[rd].value);
+                    const right = bitsAsFloat32(this.fregs[rt].value);
+                    let res = 0;
+                    // if we loaded these from memory, just preserve one of the values, don't try to do math
+                    if (!plausibleFloat(left)) {
+                        res = right;
+                    } else if (!plausibleFloat(right)) {
+                        res = left;
+                    } else {
+                        if (op === Opcode.SUBS)
+                            res = left - right;
+                        else if (op === Opcode.ADDS)
+                            res = left + right;
+                        else if (op === Opcode.MULS)
+                            res = left * right;
+                    }
+                    this.fregs[frd].value = float32AsBits(res);
                 } break;
                 case Opcode.MOVS: {
                     this.fregs[frd].lastOp = this.fregs[rd].lastOp;
+                    this.fregs[frd].value = this.fregs[rd].value;
                 } break;
 
                 default:
@@ -349,13 +406,15 @@ export class NaiveInterpreter {
             }
             if (op === Opcode.BEQL || op === Opcode.BNEL)
                 offs += 4; // skip the delay slot entirely
-            if (func !== 0 && op !== Opcode.JAL) {
-                const v0 = this.handleFunction(func, this.regs[RegName.A0], this.regs[RegName.A1], this.regs[RegName.A2], this.regs[RegName.A3], this.stackArgs, currBranch);
-                this.regs[RegName.V0].lastOp = Opcode.JAL;
+            if (func !== 0 && op !== Opcode.JAL && op !== Opcode.J) {
+                const v0 = this.handleFunction(func, this.regs[RegName.A0], this.regs[RegName.A1], this.regs[RegName.A2], this.regs[RegName.A3], this.stackArgs, currBranch, this.fregs[12]);
+                this.regs[RegName.V0].lastOp = funcOp;
                 this.regs[RegName.V0].value = v0;
-                this.fregs[0].lastOp = Opcode.JAL;
+                this.fregs[0].lastOp = funcOp;
                 this.fregs[0].value = v0;
                 func = 0;
+                if (funcOp === Opcode.J)
+                    break;
             }
             offs += 4;
             if (currBranch !== null &&
@@ -399,7 +458,7 @@ export class NaiveInterpreter {
         return false;
     }
 
-    protected handleFunction(func: number, a0: Register, a1: Register, a2: Register, a3: Register, stackArgs: (Register | null)[], branch: BranchInfo | null): number {
+    protected handleFunction(func: number, a0: Register, a1: Register, a2: Register, a3: Register, stackArgs: (Register | null)[], branch: BranchInfo | null, f12: Register): number {
         return 0;
     }
 

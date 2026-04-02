@@ -43,14 +43,14 @@ export function dKyw_rain_set(envLight: dScnKy_env_light_c, count: number): void
     envLight.rainCountOrig = count;
 }
 
-export const enum ThunderMode {
+export enum ThunderMode {
     Off     = 0,
     On      = 1,
     Kytag = 2,
     FarOnly = 10,
 }
 
-export const enum ThunderState {
+export enum ThunderState {
     Clear      = 0,
     FlashNear  = 1,
     FlashFar   = 11,
@@ -198,7 +198,7 @@ const scratchVec3e = vec3.create();
 
 export class dKankyo_sun_Packet {
     // Shared
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('dKankyo_sun_Packet');
 
     // Sun/Moon
     private moonTextures: BTIData[] = [];
@@ -581,7 +581,7 @@ export class dKankyo_vrkumo_Packet {
     public strength = 0;
     public eff = nArray(100, () => new VRKUMO_EFF());
     public bounceAnimTimer = 0;
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('dKankyo_vrkumo_Packet');
     private textures: BTIData[] = [];
     private materialHelper: GXMaterialHelperGfx;
 
@@ -764,7 +764,7 @@ class RAIN_EFF {
 
 export class dKankyo_rain_Packet {
     private ringTexture: BTIData;
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('dKankyo_rain_Packet');
     private materialHelperRain: GXMaterialHelperGfx;
     private materialHelperSibuki: GXMaterialHelperGfx;
     private sibukiAlpha: number = 0.0;
@@ -1022,7 +1022,7 @@ export class dKankyo_wave_Packet {
 
     private texUsonami: BTIData;
     private texUsonamiM: BTIData;
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('dKankyo_wave_Packet');
     private materialHelper: GXMaterialHelperGfx;
 
     public skewDirection = 0.0;
@@ -1176,7 +1176,7 @@ export class dKankyo_star_Packet {
         colorNewFromRGBA8(0xC8C8FFFF),
     ];
 
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('dKankyo_star_Packet');
     private materialHelper: GXMaterialHelperGfx;
 
     public renderInMain = false;
@@ -1340,7 +1340,7 @@ export class dKankyo_housi_Packet {
     public alpha = 0.0;
     public count = 0;
 
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('dKankyo_housi_Packet');
     private materialHelper: GXMaterialHelperGfx;
 
     private texData: BTIData;
@@ -1456,7 +1456,7 @@ export class dKankyo_moya_Packet {
     public count = 0;
     public rot = 0;
 
-    private ddraw = new TDDraw();
+    private ddraw = new TDDraw('dKankyo_moya_Packet');
     private materialHelper: GXMaterialHelperGfx;
 
     private texData: BTIData;
@@ -1564,7 +1564,7 @@ export function dKyr_get_vectle_calc(p0: ReadonlyVec3, p1: ReadonlyVec3, dst: ve
     vec3.normalize(dst, dst);
 }
 
-const enum SunPeekZResult {
+enum SunPeekZResult {
     Visible, Obscured, Culled,
 }
 

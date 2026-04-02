@@ -7,7 +7,7 @@ import { readString, assert, nArray, assertExists } from "../util.js";
 import { TextureMapping } from "../TextureHolder.js";
 import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
 
-const enum ImageFormat {
+enum ImageFormat {
     RGBA8888      = 0x00,
     ABGR8888      = 0x01,
     RGB888        = 0x02,
@@ -205,7 +205,7 @@ function imageFormatConvertData(device: GfxDevice, fmt: ImageFormat, data: Array
     }
 }
 
-export const enum VTFFlags {
+export enum VTFFlags {
     NONE          = 0,
     POINTSAMPLE   = 1 << 0,
     TRILINEAR     = 1 << 1,
@@ -240,7 +240,7 @@ export class VTF {
     private versionMajor: number;
     private versionMinor: number;
 
-    constructor(device: GfxDevice, cache: GfxRenderCache, buffer: ArrayBufferSlice | null, private name: string, srgb: boolean, public lateBinding: string | null = null) {
+    constructor(device: GfxDevice, cache: GfxRenderCache, buffer: ArrayBufferSlice | null, private name: string, srgb: boolean, public lateBinding: string | undefined = undefined) {
         if (buffer === null)
             return;
 
@@ -343,7 +343,10 @@ export class VTF {
 
         for (let i = 0; i < this.numFrames; i++) {
             const texture = device.createTexture(descriptor);
-            device.setResourceName(texture, `${this.name} frame ${i}`);
+            if (this.numFrames === 1)
+                device.setResourceName(texture, this.name);
+            else
+                device.setResourceName(texture, `${this.name} [${i}]`);
             this.gfxTextures.push(texture);
         }
 
@@ -400,13 +403,15 @@ export class VTF {
             m.gfxTexture = assertExists(this.gfxTextures[frame]);
         }
         m.gfxSampler = this.gfxSampler;
-        m.width = this.width;
-        m.height = this.height;
         m.lateBinding = this.lateBinding;
     }
 
     public isTranslucent(): boolean {
         return !!(this.flags & (VTFFlags.ONEBITALPHA | VTFFlags.EIGHTBITALPHA));
+    }
+
+    public isCubemap(): boolean {
+        return !!(this.flags & VTFFlags.ENVMAP);
     }
 
     public destroy(device: GfxDevice): void {

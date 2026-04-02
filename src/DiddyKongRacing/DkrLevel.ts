@@ -33,7 +33,9 @@ export class DkrLevel {
 
     // Remove when the Animator object is properly implemented.
     public id: number = -1;
+    public hasCameraAnimation = false;
     private hackCresIslandTexScrollers: { drawCall: DkrDrawCall, scrollU: number, scrollV: number }[] = [];
+    private animChannel = 1;
 
     constructor(device: GfxDevice, renderHelper: GfxRenderHelper, private textureCache: DkrTextureCache, id: string, private dataManager: DataManager, private sprites: DkrSprites) {
         if (id.startsWith('model:')) {
@@ -41,7 +43,7 @@ export class DkrLevel {
             const modelId = parseInt(id.slice(6));
             const modelDataBuffer = dataManager.getLevelModel(modelId);
 
-            this.model = new DkrLevelModel(device, renderHelper, this, textureCache, modelDataBuffer);
+            this.model = new DkrLevelModel(renderHelper.renderCache, this, textureCache, modelDataBuffer);
         } else {
             this.id = parseInt(id);
             const headerDataBuffer = dataManager.getLevelHeader(this.id);
@@ -65,17 +67,22 @@ export class DkrLevel {
             const objectMap2Buffer = dataManager.getLevelObjectMap(objectMap2Id);
 
             if (skydomeId !== 0xFFFF) {
-                this.skydome = new DkrObject(skydomeId, device, this, renderHelper, dataManager, textureCache);
-                this.skydome.setManualScale(100.0); 
+                this.skydome = new DkrObject(skydomeId, this, renderHelper.renderCache, dataManager, textureCache);
+                this.skydome.setManualScale(100.0);
                 // ^ This is a hack that seems to work okay. I'm not sure how the skydomes are scaled/drawn yet.
             }
-            this.model = new DkrLevelModel(device, renderHelper, this, textureCache, modelDataBuffer);
+            this.model = new DkrLevelModel(renderHelper.renderCache, this, textureCache, modelDataBuffer);
 
             this.objectMap1 = new DkrLevelObjectMap(objectMap1Buffer, this, device, renderHelper, dataManager, textureCache, sprites);
             this.animationTracks.addAnimationNodes(this.objectMap1.getObjects());
             this.objectMap2 = new DkrLevelObjectMap(objectMap2Buffer, this, device, renderHelper, dataManager, textureCache, sprites);
             this.animationTracks.addAnimationNodes(this.objectMap2.getObjects());
-            this.animationTracks.compile(device, this, renderHelper, dataManager, textureCache);
+            this.animationTracks.compile(this, renderHelper.renderCache, dataManager, textureCache);
+
+            this.hasCameraAnimation = this.animationTracks.hasChannel(1);
+            if (!this.hasCameraAnimation)
+                DkrControlGlobals.ENABLE_ANIM_CAMERA.on = false;
+
             this.animationNodesReady();
         }
     }
@@ -96,11 +103,6 @@ export class DkrLevel {
     }
 
     private animationNodesReady(): void {
-        if(this.animationTracks.hasChannel(1)) {
-            (DkrControlGlobals.PANEL_ANIM_CAMERA.elem as Panel).setVisible(true);
-        } else {
-            DkrControlGlobals.ENABLE_ANIM_CAMERA.on = false;
-        }
     }
 
     private mirrorCamera(viewerInput: ViewerRenderInput): void {
@@ -112,8 +114,6 @@ export class DkrLevel {
 
         this.cameraInMirrorMode = DkrControlGlobals.ADV2_MIRROR.on;
     }
-
-    private previousChannel = -1;
 
     public prepareToRender(device: GfxDevice, renderInstManager: GfxRenderInstManager, viewerInput: ViewerRenderInput): void {
         const template = renderInstManager.pushTemplate();
@@ -142,34 +142,25 @@ export class DkrLevel {
             this.objectMap2.updateObjects(viewerInput.deltaTime);
         }
 
+        DkrControlGlobals.ANIM_PROGRESS.max = this.animationTracks.getMaxDuration(this.animChannel);
+        (DkrControlGlobals.ANIM_PROGRESS.elem as Slider).setRange(
+            DkrControlGlobals.ANIM_PROGRESS.min,
+            DkrControlGlobals.ANIM_PROGRESS.max,
+            DkrControlGlobals.ANIM_PROGRESS.step
+        );
+        this.animationTracks.setAnimChannel(this.animChannel);
+
         if(DkrControlGlobals.ENABLE_ANIM_CAMERA.on && this.animationTracks.isCompiled()) {
-            // Uncomment this when cutscenes get properly implemented.
-            //const channel = DkrControlGlobals.ANIM_TRACK_SELECT.currentChannel;
-            const channel = 1; // For the main tracks channel #1 contains the flyby animation.
-
-            if(channel !== this.previousChannel) {
-                // User has changed the track channel.
-                DkrControlGlobals.ANIM_PROGRESS.max = this.animationTracks.getMaxDuration(channel);
-                (DkrControlGlobals.ANIM_PROGRESS.elem as Slider).setRange(
-                    DkrControlGlobals.ANIM_PROGRESS.min,
-                    DkrControlGlobals.ANIM_PROGRESS.max,
-                    DkrControlGlobals.ANIM_PROGRESS.step
-                );
-                DkrControlGlobals.ANIM_PROGRESS.setValue(0);
-                this.previousChannel = channel;
-            }
-            if(channel >= 0) {
+            if (this.animChannel >= 0) {
                 let curFlybyPos = DkrControlGlobals.ANIM_PROGRESS.value;
-                if(!DkrControlGlobals.ANIM_THIRD_PERSON.on) {
-                    this.animationTracks.setCameraToPoint(channel, curFlybyPos, viewerInput.camera);
-                }
+                this.animationTracks.setCameraToPoint(this.animChannel, curFlybyPos, viewerInput.camera);
 
-                this.animationTracks.setObjectsToPoint(channel, curFlybyPos);
+                this.animationTracks.setObjectsToPoint(this.animChannel, curFlybyPos);
                 if(!DkrControlGlobals.ANIM_PAUSED.on) {
                     curFlybyPos += (viewerInput.deltaTime / 1000.0) * DkrControlGlobals.ANIM_SPEED.value;
-                    const maxDuration = this.animationTracks.getMaxDuration(channel);
+                    const maxDuration = this.animationTracks.getMaxDuration(this.animChannel);
                     if(curFlybyPos >= maxDuration) {
-                        if(this.animationTracks.doesTrackLoop(channel)) {
+                        if(this.animationTracks.doesTrackLoop(this.animChannel)) {
                             curFlybyPos -= maxDuration;
                         } else {
                             curFlybyPos = maxDuration;

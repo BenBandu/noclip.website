@@ -11,7 +11,7 @@ import { UnityMaterialData } from '../Common/Unity/AssetManager.js';
 import { GfxRenderInst, GfxRenderInstList } from '../gfx/render/GfxRenderInstManager.js';
 import { fallback, nArray } from '../util.js';
 import { TextureMapping } from '../TextureHolder.js';
-import { UnityVersion } from '../../rust/pkg/noclip_support.js';
+import { UnityVersion } from 'noclip-rust-support';
 
 class TempMaterialProgram extends UnityShaderProgramBase {
     public static ub_MaterialParams = 2;
@@ -268,7 +268,7 @@ class UnityRenderer implements Viewer.SceneGfx {
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
-        this.renderHelper.renderGraph.execute(builder);
+        builder.execute();
         this.renderInstListMain.reset();
     }
 

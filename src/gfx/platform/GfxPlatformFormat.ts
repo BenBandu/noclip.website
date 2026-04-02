@@ -3,7 +3,7 @@
 
 import { GfxSamplerFormatKind } from "./GfxPlatform.js";
 
-export const enum FormatTypeFlags {
+export enum FormatTypeFlags {
     U8 = 0x01,
     U16,
     U32,
@@ -36,7 +36,7 @@ export const enum FormatTypeFlags {
     D32FS8,
 };
 
-export const enum FormatCompFlags {
+export enum FormatCompFlags {
     R    = 0x01,
     RG   = 0x02,
     RGB  = 0x03,
@@ -48,7 +48,7 @@ export function getFormatCompFlagsComponentCount(n: FormatCompFlags): number {
     return n;
 }
 
-export const enum FormatFlags {
+export enum FormatFlags {
     None         = 0b00000000,
     Normalized   = 0b00000001,
     sRGB         = 0b00000010,
@@ -88,6 +88,8 @@ export enum GfxFormat {
     U32_R           = makeFormat(FormatTypeFlags.U32,       FormatCompFlags.R,                FormatFlags.None),
     U32_RG          = makeFormat(FormatTypeFlags.U32,       FormatCompFlags.RG,               FormatFlags.None),
     S8_R            = makeFormat(FormatTypeFlags.S8,        FormatCompFlags.R,                FormatFlags.None),
+    S8_RG           = makeFormat(FormatTypeFlags.S8,        FormatCompFlags.RG,               FormatFlags.None),
+    S8_RGBA         = makeFormat(FormatTypeFlags.S8,        FormatCompFlags.RGBA,             FormatFlags.None),
     S8_R_NORM       = makeFormat(FormatTypeFlags.S8,        FormatCompFlags.R,                FormatFlags.Normalized),
     S8_RG_NORM      = makeFormat(FormatTypeFlags.S8,        FormatCompFlags.RG,               FormatFlags.Normalized),
     S8_RGB_NORM     = makeFormat(FormatTypeFlags.S8,        FormatCompFlags.RGB,              FormatFlags.Normalized),
@@ -122,15 +124,15 @@ export enum GfxFormat {
     BC7_SRGB        = makeFormat(FormatTypeFlags.BC7,        FormatCompFlags.RGBA, FormatFlags.Normalized | FormatFlags.sRGB),
 
     // Depth/Stencil
-    D24             = makeFormat(FormatTypeFlags.D24,       FormatCompFlags.R,  FormatFlags.Depth),
-    D24_S8          = makeFormat(FormatTypeFlags.D24S8,     FormatCompFlags.RG, FormatFlags.Depth | FormatFlags.Stencil),
-    D32F            = makeFormat(FormatTypeFlags.D32F,      FormatCompFlags.R,  FormatFlags.Depth),
-    D32F_S8         = makeFormat(FormatTypeFlags.D32FS8,    FormatCompFlags.RG, FormatFlags.Depth | FormatFlags.Stencil),
+    D24             = makeFormat(FormatTypeFlags.D24,        FormatCompFlags.R,  FormatFlags.Depth),
+    D24_S8          = makeFormat(FormatTypeFlags.D24S8,      FormatCompFlags.RG, FormatFlags.Depth | FormatFlags.Stencil),
+    D32F            = makeFormat(FormatTypeFlags.D32F,       FormatCompFlags.R,  FormatFlags.Depth),
+    D32F_S8         = makeFormat(FormatTypeFlags.D32FS8,     FormatCompFlags.RG, FormatFlags.Depth | FormatFlags.Stencil),
 
     // Special RT formats for preferred backend support.
-    U8_RGB_RT       = makeFormat(FormatTypeFlags.U8,        FormatCompFlags.RGB,  FormatFlags.RenderTarget | FormatFlags.Normalized),
-    U8_RGBA_RT      = makeFormat(FormatTypeFlags.U8,        FormatCompFlags.RGBA, FormatFlags.RenderTarget | FormatFlags.Normalized),
-    U8_RGBA_RT_SRGB = makeFormat(FormatTypeFlags.U8,        FormatCompFlags.RGBA, FormatFlags.RenderTarget | FormatFlags.Normalized | FormatFlags.sRGB),
+    U8_RGB_RT       = makeFormat(FormatTypeFlags.U8,         FormatCompFlags.RGB,  FormatFlags.RenderTarget | FormatFlags.Normalized),
+    U8_RGBA_RT      = makeFormat(FormatTypeFlags.U8,         FormatCompFlags.RGBA, FormatFlags.RenderTarget | FormatFlags.Normalized),
+    U8_RGBA_RT_SRGB = makeFormat(FormatTypeFlags.U8,         FormatCompFlags.RGBA, FormatFlags.RenderTarget | FormatFlags.Normalized | FormatFlags.sRGB),
 }
 
 export function getFormatCompFlags(fmt: GfxFormat): FormatCompFlags {
@@ -176,7 +178,7 @@ export function getFormatComponentCount(fmt: GfxFormat): number {
 }
 
 /**
- * 
+ * Returns the byte size of one element of the format {@param fmt}.
  */
 export function getFormatByteSize(fmt: GfxFormat): number {
     const typeFlags = getFormatTypeFlags(fmt);
@@ -192,6 +194,7 @@ export function getFormatByteSize(fmt: GfxFormat): number {
     case FormatTypeFlags.BC4_SNORM:
     case FormatTypeFlags.BC5_UNORM:
     case FormatTypeFlags.BC5_SNORM:
+    case FormatTypeFlags.BC7:
         throw "whoops"; // Not valid to call on compressed texture formats...
     default:
         const typeByteSize = getFormatTypeFlagsByteSize(typeFlags);
@@ -225,4 +228,68 @@ export function getFormatSamplerKind(fmt: GfxFormat): GfxSamplerFormatKind {
         return GfxSamplerFormatKind.Sint;
     else
         throw "whoops";
+}
+
+export function isFormatTextureCompressionBC(fmt: GfxFormat): boolean {
+    const formatTypeFlags = getFormatTypeFlags(fmt);
+
+    switch (formatTypeFlags) {
+        case FormatTypeFlags.BC1:
+        case FormatTypeFlags.BC2:
+        case FormatTypeFlags.BC3:
+        case FormatTypeFlags.BC4_SNORM:
+        case FormatTypeFlags.BC4_UNORM:
+        case FormatTypeFlags.BC5_SNORM:
+        case FormatTypeFlags.BC5_UNORM:
+        case FormatTypeFlags.BC7:
+            return true;
+    }
+
+    return false;
+}
+
+/**
+ * Returns the byte size of one block of the texture format {@param fmt}.
+ * If {@param fmt} is not a block-compressed format, this returns the same value as {@see getFormatByteSizePerBlock}.
+ */
+export function getFormatByteSizePerBlock(fmt: GfxFormat): number {
+    const formatTypeFlags = getFormatTypeFlags(fmt);
+
+    switch (formatTypeFlags) {
+        case FormatTypeFlags.BC1:
+        case FormatTypeFlags.BC4_SNORM:
+        case FormatTypeFlags.BC4_UNORM:
+            return 8;
+        case FormatTypeFlags.BC2:
+        case FormatTypeFlags.BC3:
+        case FormatTypeFlags.BC5_SNORM:
+        case FormatTypeFlags.BC5_UNORM:
+        case FormatTypeFlags.BC7:
+            return 16;
+    }
+
+    return getFormatByteSize(fmt);
+}
+
+/**
+ * Returns the number of texels (in one direction), in one block of format {@param fmt}.
+ * This assumes all blocks in a block-compressed format are square (that is, the block width equals the block height).
+ * If {@param fmt} is not a block-compressed format, this always returns {@constant 1}.
+ */
+export function getFormatBlockSizeInTexels(fmt: GfxFormat): number {
+    const formatTypeFlags = getFormatTypeFlags(fmt);
+
+    switch (formatTypeFlags) {
+        case FormatTypeFlags.BC1:
+        case FormatTypeFlags.BC2:
+        case FormatTypeFlags.BC3:
+        case FormatTypeFlags.BC4_SNORM:
+        case FormatTypeFlags.BC4_UNORM:
+        case FormatTypeFlags.BC5_SNORM:
+        case FormatTypeFlags.BC5_UNORM:
+        case FormatTypeFlags.BC7:
+            return 4;
+    }
+
+    return 1;
 }

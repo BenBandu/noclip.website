@@ -1,22 +1,21 @@
 
-import { GfxDevice, GfxBuffer, GfxInputLayout, GfxFormat, GfxVertexBufferFrequency, GfxVertexAttributeDescriptor, GfxBufferUsage, GfxSampler, GfxWrapMode, GfxTexFilterMode, GfxMipFilterMode, GfxCullMode, GfxCompareMode, makeTextureDescriptor2D, GfxProgram, GfxMegaStateDescriptor, GfxBlendMode, GfxBlendFactor, GfxInputLayoutBufferDescriptor, GfxTexture, GfxVertexBufferDescriptor, GfxIndexBufferDescriptor } from "../gfx/platform/GfxPlatform.js";
-import { BINModel, BINTexture, BINModelSector, BINModelPart, GSConfiguration } from "./bin.js";
-import { DeviceProgram } from "../Program.js";
-import * as Viewer from "../viewer.js";
-import { makeStaticDataBuffer } from "../gfx/helpers/BufferHelpers.js";
 import { ReadonlyMat4, mat4, vec3 } from "gl-matrix";
-import { fillMatrix4x3, fillColor, fillMatrix4x2, fillVec4 } from "../gfx/helpers/UniformBufferHelpers.js";
-import { TextureMapping } from "../TextureHolder.js";
-import { nArray, assert } from "../util.js";
-import { GfxRenderInstManager, GfxRendererLayer, setSortKeyDepth, makeSortKey } from "../gfx/render/GfxRenderInstManager.js";
-import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
-import { reverseDepthForCompareMode } from "../gfx/helpers/ReversedDepthHelpers.js";
-import { GSAlphaCompareMode, GSAlphaFailMode, GSTextureFunction, GSDepthCompareMode, GSTextureFilter, GSPixelStorageFormat, psmToString } from "../Common/PS2/GS.js";
-import { setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
+import { GSAlphaCompareMode, GSAlphaFailMode, GSDepthCompareMode, GSPixelStorageFormat, GSTextureFilter, GSTextureFunction, psmToString } from "../Common/PS2/GS.js";
 import { AABB } from "../Geometry.js";
-import { convertToCanvas } from "../gfx/helpers/TextureConversionHelpers.js";
-import ArrayBufferSlice from "../ArrayBufferSlice.js";
+import { createBufferFromData } from "../gfx/helpers/BufferHelpers.js";
+import { gfxDeviceNeedsFlipY } from "../gfx/helpers/GfxDeviceHelpers.js";
+import { setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
 import { GfxShaderLibrary } from "../gfx/helpers/GfxShaderLibrary.js";
+import { reverseDepthForCompareMode } from "../gfx/helpers/ReversedDepthHelpers.js";
+import { fillColor, fillMatrix4x2, fillMatrix4x3, fillVec4 } from "../gfx/helpers/UniformBufferHelpers.js";
+import { GfxBlendFactor, GfxBlendMode, GfxBuffer, GfxBufferFrequencyHint, GfxBufferUsage, GfxCompareMode, GfxCullMode, GfxDevice, GfxFormat, GfxIndexBufferDescriptor, GfxInputLayout, GfxInputLayoutBufferDescriptor, GfxMegaStateDescriptor, GfxMipFilterMode, GfxProgram, GfxTexFilterMode, GfxTexture, GfxVertexAttributeDescriptor, GfxVertexBufferDescriptor, GfxVertexBufferFrequency, GfxWrapMode, makeTextureDescriptor2D } from "../gfx/platform/GfxPlatform.js";
+import { GfxRenderCache } from "../gfx/render/GfxRenderCache.js";
+import { GfxRenderInstManager, GfxRendererLayer, makeSortKey, setSortKeyDepth } from "../gfx/render/GfxRenderInstManager.js";
+import { DeviceProgram } from "../Program.js";
+import { TextureMapping } from "../TextureHolder.js";
+import { assert, nArray } from "../util.js";
+import * as Viewer from "../viewer.js";
+import { BINModel, BINModelPart, BINModelSector, BINTexture, GSConfiguration } from "./bin.js";
 
 export class KatamariDamacyProgram extends DeviceProgram {
     public static a_Position = 0;
@@ -27,7 +26,7 @@ export class KatamariDamacyProgram extends DeviceProgram {
     public static ub_ModelParams = 1;
 
     private static reflectionDeclarations = `
-precision mediump float;
+precision highp float;
 
 ${GfxShaderLibrary.MatrixLibrary}
 
@@ -152,8 +151,8 @@ export class BINModelData {
     public indexBufferDescriptor: GfxIndexBufferDescriptor;
 
     constructor(device: GfxDevice, cache: GfxRenderCache, public sectorData: BINModelSectorData, public binModel: BINModel) {
-        this.vertexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, this.binModel.vertexData.buffer);
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, this.binModel.indexData.buffer);
+        this.vertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static, this.binModel.vertexData.buffer);
+        this.indexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, this.binModel.indexData.buffer);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: KatamariDamacyProgram.a_Position, bufferIndex: 0, bufferByteOffset: 0*4, format: GfxFormat.F32_RGBA },
@@ -169,9 +168,9 @@ export class BINModelData {
         this.inputLayout = cache.createInputLayout({ vertexAttributeDescriptors, vertexBufferDescriptors, indexBufferFormat });
 
         this.vertexBufferDescriptors = [
-            { buffer: this.vertexBuffer, byteOffset: 0, },
+            { buffer: this.vertexBuffer },
         ];
-        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0 };
+        this.indexBufferDescriptor = { buffer: this.indexBuffer };
     }
 
     public destroy(device: GfxDevice): void {
@@ -207,9 +206,9 @@ function translateDepthCompareMode(cmp: GSDepthCompareMode): GfxCompareMode {
 function translateTextureFilter(filter: GSTextureFilter): [GfxTexFilterMode, GfxMipFilterMode] {
     switch (filter) {
     case GSTextureFilter.NEAREST:
-        return [GfxTexFilterMode.Point,    GfxMipFilterMode.NoMip];
+        return [GfxTexFilterMode.Point,    GfxMipFilterMode.Nearest];
     case GSTextureFilter.LINEAR:
-        return [GfxTexFilterMode.Bilinear, GfxMipFilterMode.NoMip];
+        return [GfxTexFilterMode.Bilinear, GfxMipFilterMode.Nearest];
     case GSTextureFilter.NEAREST_MIPMAP_NEAREST:
         return [GfxTexFilterMode.Point,    GfxMipFilterMode.Nearest];
     case GSTextureFilter.NEAREST_MIPMAP_LINEAR:
@@ -271,6 +270,7 @@ export class BINModelPartInstance {
         const texMinFilter: GSTextureFilter = (gsConfiguration.tex1_1_data0 >>> 6) & 0x07;
         const [magFilter]            = translateTextureFilter(texMagFilter);
         const [minFilter, mipFilter] = translateTextureFilter(texMinFilter);
+        const isNoMip = texMinFilter === GSTextureFilter.LINEAR || texMinFilter === GSTextureFilter.NEAREST;
 
         const wms = (gsConfiguration.clamp_1_data0 >>> 0) & 0x03;
         const wmt = (gsConfiguration.clamp_1_data0 >>> 2) & 0x03;
@@ -280,18 +280,21 @@ export class BINModelPartInstance {
         this.textureMapping[0].gfxSampler = cache.createSampler({
             minFilter, magFilter, mipFilter,
             wrapS, wrapT,
-            minLOD: 0, maxLOD: 100,
+            minLOD: 0,
+            maxLOD: isNoMip ? 0 : 100,
         });
     }
 
     public prepareToRender(renderInstManager: GfxRenderInstManager, modelMatrices: ReadonlyMat4[], textureMatrix: ReadonlyMat4, currentPalette: number): void {
+        const device = renderInstManager.gfxRenderCache.device;
+
         const renderInst = renderInstManager.newRenderInst();
         renderInst.setGfxProgram(this.gfxProgram);
         renderInst.setMegaStateFlags(this.megaStateFlags);
 
         mat4.copy(scratchTextureMatrix, textureMatrix);
         if (this.binModelPart.textureIndex !== null)
-            this.sectorData.textureData[this.binModelPart.textureIndex].fillTextureMapping(this.textureMapping[0], scratchTextureMatrix, currentPalette);
+            this.sectorData.textureData[this.binModelPart.textureIndex].fillTextureMapping(device, this.textureMapping[0], scratchTextureMatrix, currentPalette);
         renderInst.setSamplerBindingsFromTextureMappings(this.textureMapping);
 
         renderInst.setDrawCount(this.binModelPart.indexCount, this.binModelPart.indexOffset);
@@ -380,21 +383,27 @@ class BINTextureData {
 
             if (pixels !== 'framebuffer') {
                 const gfxTexture = device.createTexture(makeTextureDescriptor2D(GfxFormat.U8_RGBA_NORM, texture.width, texture.height, 1));
-                device.setResourceName(gfxTexture, texture.name);
+                device.setResourceName(gfxTexture, `${texture.name}/${i}`);
 
                 device.uploadTextureData(gfxTexture, 0, [pixels]);
                 this.gfxTexture[i] = gfxTexture;
-    
-                this.viewerTexture[i] = textureToCanvas(texture, `${texture.name}/${i}`, pixels);
+
+                const extraInfo = new Map<string, string>();
+                const psm: GSPixelStorageFormat = (texture.tex0_data0 >>> 20) & 0x3F;
+                extraInfo.set('Format', psmToString(psm));
+
+                this.viewerTexture[i] = { gfxTexture, extraInfo };
             }
         }
     }
 
-    public fillTextureMapping(m: TextureMapping, dstMtx: mat4, paletteIndex: number = 0): void {
+    public fillTextureMapping(device: GfxDevice, m: TextureMapping, dstMtx: mat4, paletteIndex: number = 0): void {
         if (this.texture.pixels[paletteIndex] === 'framebuffer') {
             m.lateBinding = 'framebuffer';
-            dstMtx[5] *= -1;
-            dstMtx[13] += 1;
+            if (gfxDeviceNeedsFlipY(device)) {
+                dstMtx[5] *= -1;
+                dstMtx[13] += 1;
+            }
         } else {
             m.gfxTexture = this.gfxTexture[paletteIndex];
         }
@@ -423,17 +432,4 @@ export class BINModelSectorData {
         for (let i = 0; i < this.modelData.length; i++)
             this.modelData[i].destroy(device);
     }
-}
-
-function textureToCanvas(texture: BINTexture, name: string, pixels: Uint8Array): Viewer.Texture {
-    const canvas = convertToCanvas(ArrayBufferSlice.fromView(pixels), texture.width, texture.height);
-    canvas.title = name;
-
-    const surfaces = [canvas];
-
-    const extraInfo = new Map<string, string>();
-    const psm: GSPixelStorageFormat = (texture.tex0_data0 >>> 20) & 0x3F;
-    extraInfo.set('Format', psmToString(psm));
-
-    return { name: name, surfaces, extraInfo };
 }
