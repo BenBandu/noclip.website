@@ -2,17 +2,19 @@ import {SharkFile} from "./SharkFile";
 import {PakArchive} from "./PakArchive";
 import {TreeParams, LocationParams} from "./Types";
 import {Bundle, ModelInfo} from "./Bundle";
+import {SceneContext} from "../SceneBase";
 
-export class Level {
-
+export class Scene {
     private readonly definition: any;
-    private path = `data/generated/locations/${this.id}.cdr`;
+    private path = `data/generated/locations/${this.archive.id}.cdr`;
     private bundle: Bundle;
     private placements: {[key: string]: number[]} = {};
-    private entities: any[] = [];
-    private models: ModelInfo[] = [];
+    private trees: TreeParams[];
+    private scripts: any = {};
+    private bookmarks: any = {};
+    private selectpositions: any = {};
 
-    constructor(public id: string, private archive: PakArchive) {
+    constructor(public archive: PakArchive, context: SceneContext) {
         this.definition = SharkFile.fetch(this.path, this.archive);
         this.prepare();
     }
@@ -29,24 +31,19 @@ export class Level {
                 case 'loadtree':
                     this.loadTree(child.param as TreeParams);
                     break;
+                case 'scriptobject':
+                    this.scriptObject(child.param);
+                    break;
+                case 'bookmark':
+                    this.bookmark(child.param);
+                    break;
+                case 'selectpos':
+                    this.selectpos(child.param);
+                    break;
                 default:
                 // Do nothing
             }
         }
-
-        for(const model of this.models) {
-            const vinfo = this.bundle.vertexBufferInfo[model.vIndex];
-
-            console.log({
-                mesh: model.model?.meshes[0],
-                stride: vinfo.stride,
-                size: vinfo.size,
-                infoVertexCount: vinfo.size / vinfo.stride,
-                meshVertexCount: model.model?.meshes[0]?.header.vertexCount
-            })
-        }
-
-        return;
     }
 
     private initLocation(params: LocationParams) {
@@ -70,13 +67,13 @@ export class Level {
             return;
         }
 
-        if(params.tree.endsWith('volumes.sir')) {
+        if(params.name === 'instset_volumes') {
             // Return if volumes (TODO: Make toggleable in the future?)
             console.log('Skipping volumes...')
             return;
         }
 
-        if(params.tree.endsWith('_col.sir')) {
+        if(params.tree.endsWith('_col.sir') || params.tree.endsWith('_colvol.sir')) {
             // return if collision (TODO: Make toggleable in the future?)
             console.log('Skipping collisions...')
             return;
@@ -89,7 +86,6 @@ export class Level {
         }
 
         if(!Array.isArray(entities)) {
-            // If there's only one child object, it won't be placed in an array
             entities = [entities];
         }
 
@@ -97,12 +93,31 @@ export class Level {
         for(let entity of entities) {
             if(entity.model) {
                 const model = this.bundle.getModelData(filepath + '.smr', entity.model);
-                if(model !== null) {
-                    this.models.push(model);
-                }
-            } else {
-                this.entities.push(entity);
+            }
+
+            if(entity.posgen) {
+                const posgen = SharkFile.fetch(filepath + '.spr', this.archive);
             }
         }
+    }
+
+    private scriptObject(params: any) {
+        if(!(params.runflag in this.scripts))
+        {
+            this.scripts[params.runflag] = [];
+        }
+
+        const script = SharkFile.fetch(params.res, this.archive);
+
+        const combined = {id: params.id, ...script.script};
+        this.scripts[params.runflag].push(combined);
+    }
+
+    private bookmark(params: any) {
+        this.bookmarks[params.id] = params.selectpos_actor;
+    }
+
+    private selectpos(param: any) {
+        this.selectpositions[param.name] = {actor: param.pos_actor, name: param.pos_name}
     }
 }

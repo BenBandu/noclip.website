@@ -3,9 +3,9 @@ import {assert} from "../util";
 import {Endianness} from "../endian";
 
 export enum ESeekBehaviour {
-    START,
-    CURRENT,
-    END,
+    GLOBAL_START,
+    RELATIVE,
+    GLOBAL_END,
 }
 
 export type SchemaField<TStruct, TField> = TField | ((br: BinaryReader, self: Partial<TStruct>) => TField);
@@ -25,15 +25,15 @@ export class BinaryReader {
         this.isLittleEndian = endianness === Endianness.LITTLE_ENDIAN;
     }
 
-    seek(offset: number, seek: ESeekBehaviour = ESeekBehaviour.START) {
+    seek(offset: number, seek: ESeekBehaviour = ESeekBehaviour.GLOBAL_START) {
         switch (seek) {
-            case ESeekBehaviour.CURRENT:
+            case ESeekBehaviour.RELATIVE:
                 this.offset += offset;
                 break;
-            case ESeekBehaviour.END:
+            case ESeekBehaviour.GLOBAL_END:
                 this.offset = this.view.byteLength - offset;
                 break;
-            case ESeekBehaviour.START:
+            case ESeekBehaviour.GLOBAL_START:
             default:
                 this.offset = offset;
         }

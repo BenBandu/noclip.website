@@ -5,7 +5,7 @@ import {BinaryReader, ESeekBehaviour} from "./Utils";
 interface VertexBufferInfo {
     stride: number;
     length: number;
-    offset: number;
+    offset?: number;
     buffer: Uint8Array;
 }
 
@@ -49,8 +49,8 @@ interface MeshHeader {
     stageIndexOffset: number;
     stageUnknownOffset: number;
     stageAssignOffset: number;
-    animCount: number;
-    animOffset: number;
+    morphTargetCount: number;
+    morphTargetOffset: number;
     vertexCount: number;
     indexBonusCount: number;
     indexBonusOffset: number;
@@ -78,7 +78,7 @@ interface MeshData {
     bonus1: number[],
     bonus2: number[],
     bonusIndices: number[],
-    animKeys: number[],
+    morphTargetTimes: number[],
     tex: TextureData[],
 }
 
@@ -143,10 +143,20 @@ export enum EDeclarationType {
     Float16_4
 }
 
-interface TreeNode {
-    name: string,
-    offset: number;
-    children: TreeNode[],
+export interface Vector3 {
+    x: number;
+    y: number;
+    z: number;
+}
+export interface Model {
+    name: string;
+    vertexBuffers: Uint8Array[];
+    attributes: AttributeDescriptor;
+    center: Vector3;
+    bounds: Vector3;
+    bones: any[];
+    textures: any[];
+    meshes: any[];
 }
 
 export class Bundle {
@@ -154,13 +164,11 @@ export class Bundle {
     private modelStartOffset: number;
     public texturesPaths: string[];
     public files: FileData[];
+    public file: {[key: string]: any};
     public vertexBuffers: VertexBufferInfo[];
     public attributeDescriptorInfo: AttributeDescriptor[];
-    private tree: TreeNode[];
-    private offsetData: ArrayBufferSlice;
 
     constructor(private data: ArrayBufferSlice) {
-        // this.parseBasic(data);
         this.parseHeader();
     }
 
@@ -191,97 +199,142 @@ export class Bundle {
         return model;
     }
 
-    private parseBasic(data: ArrayBufferSlice) {
-        const br = new BinaryReader(data);
-        br.uint32();
+    private parse() {
+        const br = new BinaryReader(this.data);
 
-        this.texturesPaths = new Array(br.uint32());
-        for(let i = 0; i < this.texturesPaths.length; ++i) {
-            br.seek(1, ESeekBehaviour.CURRENT)
-            this.texturesPaths[i] = br.string0();
-        }
+        const textureLength = br.uint32(); // Size of texture block
+        this.texturesPaths = Array.from({length: br.uint32()}, (): string => {
+            const length = br.uint8();
+            return br.string(length + 1, '\x00');
+        });
 
-        this.vertexBuffers = new Array(br.uint32());
-        for(let i = 0; i < this.vertexBuffers.length; ++i) {
+        this.vertexBuffers = Array.from({length: br.uint32()}, (): VertexBufferInfo => {
             const stride = br.uint32();
             const length = br.uint32();
-            this.vertexBuffers[i] = {
+            return {
                 stride: stride,
                 length: length,
-                offset: br.tell(), //TODO: Remove
-                buffer: br.slice(length).createTypedArray(Uint8Array),
+                buffer: br.slice(length).createTypedArray(Uint8Array)
             }
-        }
+        });
 
-        // From here on out there's a lot of relative offsets to this specific point
-        // and since we've parsed out the start we can just store this datablock so
-        // all the offsets are global when we wanna fetch data later
-        const offset = br.tell();
-        this.offsetData = data.subarray(offset);
-
+        const dataOffset = br.tell();
 
         const fileCount = br.uint32();
-        const attributeCount = br.uint32();
-        const _ = br.uint32(); // Unknown/Unused?
+        const attrCount = br.uint32();
+        const unknCount = br.uint32(); // Unused in most(?) files
 
-        this.tree = Array.from({length: fileCount}, () => {
-            return this.getFileAsTreeNode(br, offset);
-        });
+        const fileOffsets = Array.from({length: fileCount}, (): number => dataOffset + br.uint32())
 
-        this.attributeDescriptorInfo = Array.from({length: attributeCount}, (): AttributeDescriptor => {
+        const attributeOffsetMap: {[key: number]: number} = {};
+        this.attributeDescriptorInfo = Array.from({length: attrCount}, (_, i: number): AttributeDescriptor => {
+            attributeOffsetMap[br.tell() - dataOffset] = i;
             return {
                 size: br.uint32(),
-                channels: Array.from({length: 16}, () => br.int32()),
-                count: br.uint32(),
+                channels: Array.from({length: 16}, (): number => br.int32()),
+                count: br.int32(),
             }
         });
-    }
 
-    private getFileAsTreeNode(br: BinaryReader, baseOffset: number): TreeNode {
-        const fileOffset = br.uint32();
+        const vbIndex = 0;
+        for(let i = 0; i < fileCount; i++) {
+            br.seek(fileOffsets[i]);
+            const name = br.string(0x80, '\x00');
+            this.file[name] = [];
 
-        const pos = br.tell();
-        br.seek(baseOffset + fileOffset);
+            const modelCount = br.uint32();
+            const modelOffsets = Array.from({length: modelCount}, (): number => dataOffset + br.uint32());
+            for(let j = 0; j < modelCount; j++) {
+                br.seek(modelOffsets[j]);
 
-        const name = br.string(128, '\0');
-        const children = Array.from({length: br.uint32()}, () => {
-            return this.getModelAsTreeNode(br, baseOffset)
-        });
+                const nameOffset = br.uint32();
+                const scale = br.float32();
+                const center: Vector3 = {x: br.float32(), y: br.float32(), z: br.float32()};
+                const bounds: Vector3 = {x: br.float32(), y: br.float32(), z: br.float32()};
 
-        br.seek(pos);
+                // TODO: Figure out if these are ever set
+                const unkn1 = Array.from({length: 6}, () => br.uint32());
 
-        return {
-            name: name,
-            offset: fileOffset,
-            children: children,
+                const boneCount = br.uint32();
+                const boneNameOffset = dataOffset + br.uint32();
+                const boneDataOffset = dataOffset + br.uint32();
+
+                const textureCount = br.uint32();
+                const textureOffset = dataOffset + br.uint32();
+
+                const unkn2 = Array.from({length: 2}, () => br.uint32());
+
+                const meshCount = br.uint32();
+                const meshOffsets = Array.from({length: meshCount}, (): number => dataOffset + br.uint32());
+
+                const name = br.string0()
+
+                // TODO: Read Bones
+                // TODO: Read Textures
+
+                // Read Meshes
+                for(let k = 0; k < meshCount; k++) {
+                    br.seek(meshOffsets[k]);
+                    br.seek(72, ESeekBehaviour.RELATIVE) // Skip over some sort of separator(?) 0xCF * 72
+
+                    // TODO: What does magic refer to!?
+                    const magicCount = br.uint32();
+                    const magicOffset = dataOffset + br.uint32();
+
+                    const attrOffset = br.uint32();
+                    let attributes: AttributeDescriptor | null = null;
+                    if(attrOffset !== 0) {
+                        const attrIndex = attributeOffsetMap[attrOffset];
+                        attributes = this.attributeDescriptorInfo[attrIndex];
+                    }
+
+                    // TODO: Still not sure what bitcode and usage actually do
+                    const bitcode = br.uint32();
+                    const usage = br.uint32();
+
+                    const unkn2 = Array.from({length: 2}, () => br.uint32());
+
+                    const indexCount = br.uint32();
+                    const indexOffset = dataOffset + br.uint32();
+
+                    const boneUsageCount = br.uint32();
+                    const boneUsageOffset = dataOffset + br.uint32();
+
+                    const boneVertexCount = br.uint32();
+                    const boneVertexOffset = dataOffset + br.uint32();
+                    const boneIndexOffset = dataOffset + br.uint32();
+                    const boneAssignOffset = dataOffset + br.uint32();
+
+                    const xTableCount = br.uint32();
+                    const xTableOffset = dataOffset + br.uint32();
+
+                    const unkn3 = Array.from({length: 4}, () => br.uint32());
+
+                    const tax1Count = br.uint32();
+                    const tax1Offset = dataOffset + br.uint32();
+                    const tax2Count = br.uint32();
+                    const tax2Offset = dataOffset + br.uint32();
+                    const tax3Count = br.uint32();
+                    const tax3Offset = dataOffset + br.uint32();
+
+                    const stageCount = br.uint32();
+                    const stageVerticesOffset = dataOffset + br.uint32();
+                    const stageIndicesOffset = dataOffset + br.uint32();
+                    const stageUnknOffset = dataOffset + br.uint32();
+                    const stageAssignOffset = dataOffset + br.uint32();
+
+                    const vertexCount = br.uint32();
+
+                    const unkn4 = Array.from({length: 10}, () => br.uint32());
+
+                    const bonusCount = br.uint32();
+                    const bonusOffset = dataOffset + br.uint32();
+
+                    const textureCount = br.uint32();
+                    const textureOffsets = Array.from({length: textureCount}, () => dataOffset + br.uint32());
+                }
+            }
         }
-    }
-
-    private getModelAsTreeNode(br: BinaryReader, baseOffset: number): TreeNode {
-        const modelOffset = br.uint32();
-
-        const pos = br.tell();
-        br.seek(baseOffset + modelOffset + 0x54); // goto model + some offset into it where child count + offsets are
-
-        const children = Array.from({length: br.uint32()}, (): TreeNode => {
-            return {name: '', offset: br.uint32(), children: []}
-        });
-        const name = br.string0();
-
-        br.seek(pos);
-
-        return {
-            name: name,
-            offset: modelOffset,
-            children: children,
-        }
-    }
-
-    private parseModel(info: TreeNode) {
-        const br = new BinaryReader(this.offsetData);
-
-        const header: any = {};
-        header.nameOffset = br.uint32();
     }
 
     private parseHeader() {
@@ -548,8 +601,8 @@ export class Bundle {
             stageIndexOffset: headerData.getUint32(offset += 4, true),
             stageUnknownOffset: headerData.getUint32(offset += 4, true),
             stageAssignOffset: headerData.getUint32(offset += 4, true),
-            animCount: headerData.getInt32(offset += 4, true),
-            animOffset: headerData.getUint32(offset += 4, true),
+            morphTargetCount: headerData.getInt32(offset += 4, true),
+            morphTargetOffset: headerData.getUint32(offset += 4, true),
             vertexCount: headerData.getInt32(offset += 4, true),
             indexBonusCount: headerData.getInt32(offset += 44, true), // skip unknown section
             indexBonusOffset: headerData.getUint32(offset += 4, true),
@@ -577,7 +630,7 @@ export class Bundle {
             stageIndices: [],
             stageUnknown: [],
             stageAssign: [],
-            animKeys: [],
+            morphTargetTimes: [],
             bonus1: [],
             bonus2: [],
             bonusIndices: [],
@@ -673,10 +726,10 @@ export class Bundle {
         );
         offset += 4 * submesh.stageAssign.length;
 
-        submesh.animKeys = Array.from({length: header.animCount},
+        submesh.morphTargetTimes = Array.from({length: header.morphTargetCount},
             (_, i) => meshData.getFloat32(offset + i * 4, true)
         );
-        offset += 4 * submesh.animKeys.length;
+        offset += 4 * submesh.morphTargetTimes.length;
 
         if((header.usage & 1) !== 0) {
             // Colors / Normals?
@@ -698,7 +751,7 @@ export class Bundle {
             submesh.bonusIndices = Array.from({length: header.indexBonusCount},
                 (_, i) => meshData.getUint32(offset + i * 4, true)
             );
-            offset += 4 * submesh.bonus2.length;
+            offset += 4 * submesh.bonusIndices.length;
         }
 
         for(let i = 0; i < header.textureCount; i++) {

@@ -20,7 +20,7 @@ export class PakArchive {
 
     private nodes: PakNode[];
 
-    constructor(private id: string, private data: NamedArrayBufferSlice) {
+    constructor(public id: string, private data: NamedArrayBufferSlice) {
         this.parse();
     }
 

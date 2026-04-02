@@ -4,18 +4,16 @@ import {GfxDevice} from "../gfx/platform/GfxPlatform";
 import {SceneContext} from "../SceneBase";
 import {PakArchive} from "./PakArchive";
 import {DreamfallRenderer} from "./Renderer";
-import {Level} from "./Level";
+import {Scene} from "./Scene";
 
 export class DreamfallSceneDesc implements SceneDesc {
-    private static basePath: string = `Dreamfall/bin/res`;
-
-    constructor(public id: string, public name: string) {
-    }
+    constructor(public id: string, public name: string) {}
 
     public async createScene(device: GfxDevice, sceneContext: SceneContext): Promise<SceneGfx> {
-        const archive = new PakArchive(this.id, await sceneContext.dataFetcher.fetchData(`${DreamfallSceneDesc.basePath}/${this.id}.pak`));
-        const level = new Level(this.id, archive);
-        return new DreamfallRenderer(device, level);
+        const path = `Dreamfall/bin/res/${this.id}.pak`;
+        const archive = new PakArchive(this.id, await sceneContext.dataFetcher.fetchData(path));
+        const scene = new Scene(archive, sceneContext);
+        return new DreamfallRenderer(device, scene);
     }
 }
 
@@ -65,6 +63,9 @@ const sceneDescs = [
     new DreamfallSceneDesc("vactrax",   "Vactrax"),
     new DreamfallSceneDesc("hydrofoil", "Hydrofoil"),
     new DreamfallSceneDesc("scramjet",  "Scramjet"),
+
+    "Arcadia - Northlands",
+    new DreamfallSceneDesc('nortlands_forest', 'Northlands Forest'),
 
     "Arcadia - Underground",
     new DreamfallSceneDesc("undergroundcave",   "Underground Cave"),
