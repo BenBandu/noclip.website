@@ -1,7 +1,6 @@
-import {DataFetcher, NamedArrayBufferSlice} from "../DataFetcher";
-import { assert, readString } from "../util.js";
 import ArrayBufferSlice from "../ArrayBufferSlice";
 import {BinaryReader} from "./Utils";
+import {SceneContext} from "../SceneBase";
 
 export interface PakNode {
     offset: number;
@@ -15,19 +14,24 @@ export interface PakNode {
 }
 
 export class PakArchive {
+    private data: ArrayBufferSlice;
     private static magic: string = `tlj_pack0001`;
     private static charTable = `\0abcdefghijklmnopqrstuvwxyz\\??-_'.0123456789`;
 
     private nodes: PakNode[];
 
-    constructor(public id: string, private data: NamedArrayBufferSlice) {
+    public async load(id: string, context: SceneContext) {
+        const path = `Dreamfall/bin/res/${id}.pak`;
+        this.data = await context.dataFetcher.fetchData(path)
         this.parse();
     }
 
     private parse() {
+        console.assert(this.data !== undefined);
         const br = new BinaryReader(this.data);
+
         const magic = br.string(PakArchive.magic.length);
-        assert(magic === PakArchive.magic, `Magic mismatch in pak "${this.id}"`);
+        console.assert(magic === PakArchive.magic);
 
         this.parseNodes(br);
     }
@@ -49,13 +53,6 @@ export class PakArchive {
 
         const indexBuffer = br.slice(indexBufferSize).createTypedArray(Uint8Array);
 
-        /*
-         * An array of offsets into the index buffer, each offset pointing  to the start of each string.
-         * Unused for now, because nodes have an offset into the buffer as well.
-         */
-        // const bufferOffset = br.slice(stringCount * 4).createTypedArray(Uint32Array);
-
-
         for(const node of this.nodes) {
             const start = node.pathStartIndex;
             const end = indexBuffer.indexOf(0, start);
@@ -73,7 +70,6 @@ export class PakArchive {
     public getFile(filepath: string): ArrayBufferSlice | null {
         const node = this.findNode(filepath);
         if(node) {
-            //TODO: Write file to disk for caching?
             return this.data.subarray(node.offset, node.fileSize);
         }
 

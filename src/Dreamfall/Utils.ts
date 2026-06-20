@@ -53,8 +53,8 @@ export class BinaryReader {
 
     variableInt(): number {
         const maxIter = 10;
-        const contBit = 0x80;
-        const signBit = 0x40;
+        const continueMask = 0x80;
+        const signedMask = 0x40;
 
         let result = 0;
         for (let i = 0; i < maxIter; i++) {
@@ -65,11 +65,11 @@ export class BinaryReader {
 
             result |= content << offset;
 
-            if((byte & contBit) !== 0) {
+            if((byte & continueMask) !== 0) {
                 continue;
             }
 
-            if(byte & signBit) {
+            if(byte & signedMask) {
                 result -= 1 << offset;
             }
 

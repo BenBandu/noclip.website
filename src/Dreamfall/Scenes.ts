@@ -2,17 +2,16 @@ import * as Viewer from '../viewer.js';
 import {SceneDesc, SceneGfx} from '../viewer.js';
 import {GfxDevice} from "../gfx/platform/GfxPlatform";
 import {SceneContext} from "../SceneBase";
-import {PakArchive} from "./PakArchive";
 import {DreamfallRenderer} from "./Renderer";
-import {Scene} from "./Scene";
+import {DreamfallScene} from "./DreamfallScene";
 
 export class DreamfallSceneDesc implements SceneDesc {
     constructor(public id: string, public name: string) {}
 
     public async createScene(device: GfxDevice, sceneContext: SceneContext): Promise<SceneGfx> {
-        const path = `Dreamfall/bin/res/${this.id}.pak`;
-        const archive = new PakArchive(this.id, await sceneContext.dataFetcher.fetchData(path));
-        const scene = new Scene(archive, sceneContext);
+        const scene = new DreamfallScene(this.id);
+        await scene.initialize(sceneContext);
+
         return new DreamfallRenderer(device, scene);
     }
 }

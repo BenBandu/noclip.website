@@ -1,6 +1,4 @@
-import {assert} from "../util.js";
 import ArrayBufferSlice from "../ArrayBufferSlice";
-import {PakArchive} from "./PakArchive";
 import {BinaryReader} from "./Utils";
 import {Endianness} from "../endian";
 
@@ -30,24 +28,17 @@ export class SharkFile {
     // .scr = Shader Code Resource? - contains actual d3d9 shader asm?
     // .ikr = IK Resource? - contains IK data?
 
-    private static magic = "shark3d_snake_binary";
-
     public root: {[key: string]: any};
     private stringTable = new Map<number, string>();
     private stringCount = 0;
 
-    constructor(private id: string, data: ArrayBufferSlice) {
+    constructor(data: ArrayBufferSlice) {
         this.parse(data);
     }
 
-    public static fetch(path: string, archive: PakArchive): any | null {
-        const data = archive.getFile(path);
-        if(data === null) {
-            return null;
-        }
-
-        let file = new SharkFile(path, data);
-        return file.root;
+    public getAsObject() {
+        console.assert(this.root !== undefined);
+        return this.root;
     }
 
     private parse(data: ArrayBufferSlice) {
@@ -55,7 +46,7 @@ export class SharkFile {
 
         const magic = br.string0();
         const version = br.string0();
-        assert(magic === SharkFile.magic && version === "2x4", `Magic mismatch in Shark3D`);
+        console.assert(magic === 'shark3d_snake_binary' && version === "2x4");
 
         this.root = this.parseNode(br);
     }
@@ -115,7 +106,7 @@ export class SharkFile {
                     node[name] = nodes;
                     break;
                 default:
-                    assert(false, `Unrecognized code in Shark3D ${this.id}.cdr`);
+                    console.assert(false);
             }
         }
 
