@@ -13,6 +13,7 @@ import { WebXRContext, WebXRInputManager } from './WebXR.js';
 import { IS_DEVELOPMENT } from './BuildVersion.js';
 import { GlobalSaveManager } from './SaveManager.js';
 import { mat4 } from 'gl-matrix';
+import ArrayBufferSlice from './ArrayBufferSlice.js';
 
 export interface ViewerUpdateInfo {
     time: number;
@@ -52,7 +53,7 @@ export interface SceneGfx {
     adjustCameraController?(c: CameraController): void;
     getDefaultWorldMatrix?(dst: mat4): void;
     serializeSaveState?(dst: ArrayBuffer, offs: number): number;
-    deserializeSaveState?(src: ArrayBuffer, offs: number, byteLength: number): number;
+    deserializeSaveState?(src: ArrayBufferSlice): void;
     onstatechanged?: () => void;
     render(device: GfxDevice, renderInput: ViewerRenderInput): void;
     destroy(device: GfxDevice): void;
@@ -414,5 +415,5 @@ export function makeErrorUI(errorCode: InitErrorCode): DocumentFragment {
 <p>Please try to update your browser to a more recent version.
 `);
     else
-        throw "whoops";
+        throw new Error("whoops");
 }
